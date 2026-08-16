@@ -62,5 +62,14 @@ build_exe.bat
 
 ---
 
+## 🗺️ Yol Haritası / Gelecek Planları (Roadmap & To-Do)
+
+- [ ] **%100 Çevrimdışı / Yerel Mod (Offline Local STT & LLM)**: İnternet bağlantısı ve API anahtarı olmadan yerel `faster-whisper` + hafif yerel modeller (`Ollama` / `Qwen 2.5` / `llama.cpp`) ile çalışma desteği.
+- [ ] **Çoklu API Sağlayıcıları & Akıllı Fallback**: OpenAI Whisper, Groq, Anthropic Claude ve DeepSeek API entegrasyonu + otomatik hata durumunda yedek sağlayıcıya geçiş.
+- [ ] **Bas-Konuş (Push-to-Talk) Modu**: Tuşa basılı tutulduğu sürece kaydedip bırakınca anında yapıştırma seçeneği.
+- [ ] **Ses Dosyası Transkripsiyonu**: `.mp3`, `.wav`, `.m4a` ses kayıtlarını doğrudan sürükle-bırak ile metne dökme.
+
+---
+
 ## 📄 Lisans
 Bu proje [MIT Lisansı](LICENSE) ile lisanslanmıştır.
