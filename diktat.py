@@ -1,5 +1,5 @@
 """
-Dictator - Zero-Friction AI Voice Dictation for Windows
+Diktat - Zero-Friction AI Voice Dictation for Windows
 Global Shortcut: Ctrl + Space
 """
 import sys

@@ -1,6 +1,6 @@
-# 🎙️ Dictator — Zero-Friction AI Voice Dictation for Windows
+# 🎙️ Diktat — Zero-Friction AI Voice Dictation for Windows
 
-**Dictator**, Windows üzerinde herhangi bir uygulamada (Word, VS Code, Not Defteri, WhatsApp, Chrome, Slack vb.) **`Ctrl + Space`** tuşuna basarak konuştuğunuz her şeyi anında yazıya döken ve yapay zeka ile otomatik temizleyerek imlecinizin durduğu yere yapıştıran ultra hızlı, hafif bir masaüstü asistanıdır.
+**Diktat**, Windows üzerinde herhangi bir uygulamada (Word, VS Code, Not Defteri, WhatsApp, Chrome, Slack vb.) **`Ctrl + Space`** tuşuna basarak konuştuğunuz her şeyi anında yazıya döken ve yapay zeka ile otomatik temizleyerek imlecinizin durduğu yere yapıştıran ultra hızlı, hafif bir masaüstü asistanıdır.
 
 ---
 
@@ -32,8 +32,8 @@
 
 ### 2. Kurulum
 ```bash
-git clone https://github.com/KULLANICI_ADINIZ/dictator.git
-cd dictator
+git clone https://github.com/KavalMesut/diktat.git
+cd diktat
 
 pip install -r requirements.txt
 ```
@@ -46,19 +46,19 @@ GEMINI_API_KEY=your_gemini_api_key_here
 
 ### 4. Çalıştırma
 ```bash
-python dictator.py
+python diktat.py
 # veya
-run_dictator.bat
+run_diktat.bat
 ```
 
 ---
 
 ## 📦 Tek Dosya (.exe) Derleme
-İsterseniz Python kurulumu gerektirmeyen bağımsız bir `Dictator.exe` oluşturabilirsiniz:
+İsterseniz Python kurulumu gerektirmeyen bağımsız bir `Diktat.exe` oluşturabilirsiniz:
 ```bash
 build_exe.bat
 ```
-Çıktı dosyası `dist/Dictator.exe` konumunda oluşturulacaktır.
+Çıktı dosyası `dist/Diktat.exe` konumunda oluşturulacaktır.
 
 ---
 

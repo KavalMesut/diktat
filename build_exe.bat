@@ -1,16 +1,16 @@
 @echo off
-title Dictator - Standalone EXE Derleyici
+title Diktat - Standalone EXE Derleyici
 cd /d "%~dp0"
 
 echo ========================================================
-echo   Dictator - Standalone EXE Olusturucu (PyInstaller)
+echo   Diktat - Standalone EXE Olusturucu (PyInstaller)
 echo ========================================================
 echo.
 python -m pip install pyinstaller
 
 echo.
 echo Derleme basliyor...
-python -m PyInstaller --noconfirm --onefile --windowed --name "Dictator" ^
+python -m PyInstaller --noconfirm --onefile --windowed --name "Diktat" ^
     --icon="icon.ico" ^
     --exclude-module PyQt5 ^
     --exclude-module matplotlib ^
@@ -19,9 +19,9 @@ python -m PyInstaller --noconfirm --onefile --windowed --name "Dictator" ^
     --add-data ".env;." ^
     --add-data "icon.ico;." ^
     --add-data "icon.png;." ^
-    dictator.py
+    diktat.py
 
 echo.
 echo Derleme tamamlandi! 
-echo Cikti: 'dist/Dictator.exe'
+echo Cikti: 'dist/Diktat.exe'
 pause

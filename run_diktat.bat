@@ -1,14 +1,14 @@
 @echo off
-title Dictator - AI Voice Dictation
+title Diktat - AI Voice Dictation
 cd /d "%~dp0"
 
 echo ========================================================
-echo   Dictator - AI Sesli Dikte Asistani
+echo   Diktat - AI Sesli Dikte Asistani
 echo ========================================================
 echo.
-echo Dictator arkaplanda calisiyor...
+echo Diktat arkaplanda hazir bekliyor...
 echo Kisayol: [Ctrl + Space]
 echo Iptal:   [Ctrl + Alt + Space]
 echo.
-python dictator.py
+python diktat.py
 pause
