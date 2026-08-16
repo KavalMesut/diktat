@@ -1,5 +1,9 @@
 # 🎙️ Diktat — Zero-Friction AI Voice Dictation for Windows
 
+<p align="center">
+  <img src="screenshots/ss1.png" alt="Diktat Ayarlar Arayüzü" width="520" />
+</p>
+
 **Diktat**, Windows üzerinde herhangi bir uygulamada (Word, VS Code, Not Defteri, WhatsApp, Chrome, Slack vb.) **`Ctrl + Space`** tuşuna basarak konuştuğunuz her şeyi anında yazıya döken ve yapay zeka ile otomatik temizleyerek imlecinizin durduğu yere yapıştıran ultra hızlı, hafif bir masaüstü asistanıdır.
 
 ---
