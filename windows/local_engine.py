@@ -176,24 +176,47 @@ class LocalAIEngine:
         if glossary:
             prompt += f"\n\nÖZEL İSİMLER VE TERİMLER (MUTLAKA BU ŞEKİLDE YAZ):\n{glossary}"
 
-        system_instruction = f"{prompt}\n\nSADECE temizlenmiş nihai metni döndür, başka hiçbir açıklama veya markdown bloğu yazma."
+        system_instruction = f"{prompt}\n\nSADECE temizlenmiş metni döndür, başka hiçbir açıklama veya markdown bloğu yazma."
+        
+        tag = "konusma" if language == "tr" else "speech"
+        user_content = f"<{tag}>{raw_text.strip()}</{tag}>"
 
         try:
             response = self.llm_model.create_chat_completion(
                 messages=[
                     {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": raw_text}
+                    {"role": "user", "content": user_content}
                 ],
-                temperature=0.05,     # Near-deterministic for precise cleanup
+                temperature=0.0,      # Deterministic dictation formatting
                 top_p=0.9,
-                repeat_penalty=1.05,  # Gentle penalty that preserves Turkish agglutinative suffixes
-                max_tokens=1024,
-                stop=["<|im_end|>", "<|endoftext|>", "\n\n\n", "<|im_start|>"]
+                repeat_penalty=1.1,   # Prevents repetitive chat babble
+                max_tokens=512,
+                stop=["<|im_end|>", "<|endoftext|>", "\n\n", "<|im_start|>"]
             )
             cleaned = response["choices"][0]["message"]["content"].strip()
-            # Remove any accidental surrounding quotes or markdown block
+            
+            # Remove any markdown backticks or tags
             if cleaned.startswith("```") and cleaned.endswith("```"):
                 cleaned = "\n".join(cleaned.splitlines()[1:-1]).strip()
+            
+            cleaned = cleaned.replace("<konusma>", "").replace("</konusma>", "")
+            cleaned = cleaned.replace("<speech>", "").replace("</speech>", "").strip()
+            if cleaned.startswith('"') and cleaned.endswith('"'):
+                cleaned = cleaned[1:-1].strip()
+
+            # Anti-conversational hallucination guard
+            hallucination_indicators = [
+                "özür dilerim", "üzgünüm", "verilen metni analiz", "yardımcı olabilirim",
+                "lütfen verilen metn", "nasıl yardımcı", "i apologize", "as an ai", "how can i help"
+            ]
+            lower_clean = cleaned.lower()
+            lower_raw = raw_text.lower()
+            is_hallucination = any(h in lower_clean and h not in lower_raw for h in hallucination_indicators)
+
+            if is_hallucination or (len(cleaned) > 2.5 * len(raw_text) and len(raw_text) > 10):
+                print(f"[Diktat] LLM sohbet halüsinasyonu yakalandı, ham ses dökümüne dönülüyor:\n  Ham: '{raw_text}'\n  LLM: '{cleaned}'")
+                return raw_text
+
             return cleaned if cleaned else raw_text
         except Exception as e:
             print(f"Local Qwen cleanup error: {e}")
