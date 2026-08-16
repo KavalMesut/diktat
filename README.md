@@ -58,6 +58,7 @@ run_diktat.bat
 ## 🗺️ Yol Haritası / Gelecek Planları (Roadmap & To-Do)
 
 - [x] **%100 Çevrimdışı / Yerel Mod (Offline Local STT & LLM)**: `faster-whisper (large-v3-turbo)` + dahili `Qwen 2.5 3B 4-bit GGUF` (llama-cpp CUDA) entegrasyonu tamamlandı.
+- [ ] **Hibrit Mod (Yerel Whisper STT + Bulut Gemini Flash-Lite LLM)**: Ses tanımanın yerel GPU'da (`faster-whisper`), yalnızca metin temizleme ve imla düzenleme işleminin bulutta ultra hafif `Gemini 3.5 / 3.7 Flash-Lite` ile yapıldığı hibrit sağlayıcı modu.
 - [ ] **Çoklu API Sağlayıcıları & Akıllı Fallback**: OpenAI Whisper, Groq, Anthropic Claude ve DeepSeek API entegrasyonu.
 - [ ] **Bas-Konuş (Push-to-Talk) Modu**: Tuşa basılı tutulduğu sürece kaydedip bırakınca anında yapıştırma seçeneği.
 - [ ] **Ses Dosyası Transkripsiyonu**: `.mp3`, `.wav`, `.m4a` ses kayıtlarını doğrudan sürükle-bırak ile metne dökme.

@@ -351,7 +351,7 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config_mgr = config_mgr
         self.setWindowTitle("Diktat - Ayarlar")
-        self.setFixedSize(600, 720)
+        self.setFixedSize(600, 740)
 
         check_path = get_ui_asset_path("icon_check.png")
         chevron_path = get_ui_asset_path("icon_chevron.png")
@@ -405,8 +405,8 @@ class SettingsDialog(QDialog):
             QCheckBox {{
                 color: #FFF1D1;
                 font-size: 12px;
-                spacing: 10px;
-                padding: 2px 0px;
+                spacing: 11px;
+                padding: 4px 0px;
             }}
             QCheckBox::indicator {{
                 width: 18px;
@@ -543,6 +543,9 @@ class SettingsDialog(QDialog):
         select_row.addLayout(col_corner)
 
         gen_layout.addLayout(select_row)
+
+        # Distinct spacing between comboboxes and checkboxes
+        gen_layout.addSpacing(16)
 
         # Checkboxes
         self.chk_autostart = QCheckBox("Windows başlangıcında otomatik başlat (Arka planda)")
