@@ -7,11 +7,13 @@
 ## ✨ Özellikler
 
 - 🚀 **Sıfır Sürtünme (Zero Friction)**: Ekranda gereksiz pencereler açılmaz; arka planda sistem tepsisinde (System Tray) sessizce bekler.
+- 💻 **%100 Yerel AI Desteği (GPU / CUDA)**: NVIDIA RTX ekran kartınızda çalışan **`faster-whisper (large-v3-turbo)`** ve dahili **`Qwen 2.5 3B (4-bit GGUF)`** modelleri ile sıfır internet, sıfır kota ve maksimum gizlilik ile tam çevrimdışı çalışma.
 - 🎯 **Doğrudan İmlece Yapıştırma**: İmleciniz neredeyse oraya anında (`Ctrl + V`) yazar.
-- ⚡ **Ultra Hızlı (Single-Pass Pipeline)**: Gemini 3.7 Flash / 3.5 Flash Lite motoru ile konuşma biter bitmez milisaniyeler içinde metne çevrilir.
+- ⚡ **Ultra Hızlı Pipeline**: İster yerel GPU ister Gemini 3.7 Flash motoru ile konuşma biter bitmez milisaniyeler içinde metne çevrilir.
 - 🧹 **Akıllı Konuşma Temizleme**: "ıı", "şey", "yani", "hani" gibi düşünme seslerini, kekelemeleri ve tekrarları otomatik siler; noktalama işaretlerini ve büyük harfleri mükemmel ekler.
+- 🔄 **Windows ile Otomatik Başlatma**: Ayarlardan tek tıkla Windows başlangıcında otomatik ve arka planda çalışma desteği.
 - 📚 **Özel Terimler Sözlüğü (Glossary)**: Kodlama dilleri, teknik kavramlar (örn. *Kubernetes, Grafana, PyQt, Claude*) ve özel isimleri doğru yazar.
-- 🔔 **Sesli & Görsel Geri Bildirim**: Kayıt başladığında/bittiğinde zarif bir bip sesi çalar ve ekranın köşesinde yarı saydam mini kayıt göstergesi belirir.
+- 🔔 **Sesli & Görsel Geri Bildirim**: Kayıt başladığında/bittiğinde zarif bir bip sesi çalar ve ekranın köşesinde modern temalı mini kayıt göstergesi belirir.
 
 ---
 
@@ -19,8 +21,8 @@
 
 | Kısayol | İşlem |
 |---|---|
-| **`Ctrl + Space`** | Dikteyi Başlat / Durdur & Yapıştır |
-| **`Ctrl + Alt + Space`** | Dikteyi İptal Et |
+| **`Ctrl + Space`** | Diktatı Başlat / Durdur & Yapıştır |
+| **`Ctrl + Alt + Space`** | Diktatı İptal Et |
 
 ---
 
@@ -28,7 +30,8 @@
 
 ### 1. Gereksinimler
 - Windows 10 / 11
-- Python 3.10+ (veya doğrudan `.exe` sürümü)
+- Python 3.10+
+- NVIDIA Ekran Kartı (RTX 4060 Ti veya benzeri CUDA destekli GPU) veya Bulut API Anahtarı
 
 ### 2. Kurulum
 ```bash
@@ -38,10 +41,9 @@ cd diktat
 pip install -r requirements.txt
 ```
 
-### 3. API Anahtarı
-`.env.example` dosyasını `.env` olarak kopyalayın ve Google AI Studio API anahtarınızı girin:
-```env
-GEMINI_API_KEY=your_gemini_api_key_here
+### 3. Modelleri İndirme (Yerel Mod İçin)
+```bash
+python download_local_models.py
 ```
 
 ### 4. Çalıştırma
@@ -53,19 +55,10 @@ run_diktat.bat
 
 ---
 
-## 📦 Tek Dosya (.exe) Derleme
-İsterseniz Python kurulumu gerektirmeyen bağımsız bir `Diktat.exe` oluşturabilirsiniz:
-```bash
-build_exe.bat
-```
-Çıktı dosyası `dist/Diktat.exe` konumunda oluşturulacaktır.
-
----
-
 ## 🗺️ Yol Haritası / Gelecek Planları (Roadmap & To-Do)
 
-- [ ] **%100 Çevrimdışı / Yerel Mod (Offline Local STT & LLM)**: İnternet bağlantısı ve API anahtarı olmadan yerel `faster-whisper` + hafif yerel modeller (`Ollama` / `Qwen 2.5` / `llama.cpp`) ile çalışma desteği.
-- [ ] **Çoklu API Sağlayıcıları & Akıllı Fallback**: OpenAI Whisper, Groq, Anthropic Claude ve DeepSeek API entegrasyonu + otomatik hata durumunda yedek sağlayıcıya geçiş.
+- [x] **%100 Çevrimdışı / Yerel Mod (Offline Local STT & LLM)**: `faster-whisper (large-v3-turbo)` + dahili `Qwen 2.5 3B 4-bit GGUF` (llama-cpp CUDA) entegrasyonu tamamlandı.
+- [ ] **Çoklu API Sağlayıcıları & Akıllı Fallback**: OpenAI Whisper, Groq, Anthropic Claude ve DeepSeek API entegrasyonu.
 - [ ] **Bas-Konuş (Push-to-Talk) Modu**: Tuşa basılı tutulduğu sürece kaydedip bırakınca anında yapıştırma seçeneği.
 - [ ] **Ses Dosyası Transkripsiyonu**: `.mp3`, `.wav`, `.m4a` ses kayıtlarını doğrudan sürükle-bırak ile metne dökme.
 

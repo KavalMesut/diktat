@@ -3,7 +3,7 @@ title Diktat - AI Voice Dictation
 cd /d "%~dp0"
 
 echo ========================================================
-echo   Diktat - AI Sesli Dikte Asistani
+echo   Diktat - AI Sesli Diktat Asistani
 echo ========================================================
 echo.
 echo Diktat arkaplanda hazir bekliyor...

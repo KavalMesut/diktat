@@ -5,6 +5,7 @@ import requests
 import soundfile as sf
 import numpy as np
 from .prompts import CLEANUP_PROMPT_TR, CLEANUP_PROMPT_EN
+from .local_engine import LocalAIEngine
 
 class AIClient:
     def __init__(self, config: dict):
@@ -14,6 +15,7 @@ class AIClient:
             "User-Agent": "aistudio-build",
             "Content-Type": "application/json"
         })
+        self.local_engine = LocalAIEngine.get_instance(config)
 
     def audio_to_wav_bytes(self, audio_data: np.ndarray, sample_rate: int = 16000) -> bytes:
         """Convert float32 array to compact 16-bit PCM WAV bytes."""
@@ -23,29 +25,58 @@ class AIClient:
 
     def transcribe_and_cleanup(self, audio_data: np.ndarray, sample_rate: int = 16000) -> tuple[str, str]:
         """
-        Ultra-fast single-pass transcription + prompt-based cleanup.
-        Returns (raw_transcript, cleaned_transcript).
+        Processes audio using configured provider:
+        - "local": RTX 4060 Ti GPU Faster-Whisper + Qwen 2.5 3B (Offline)
+        - "gemini": Google Gemini 3.7 Flash
+        - "openai": OpenAI Whisper + GPT-4o-mini
         """
-        wav_bytes = self.audio_to_wav_bytes(audio_data, sample_rate)
+        provider = self.config.get("provider", "local")
+        lang = self.config.get("language", "tr")
+        glossary = self.config.get("glossary", "")
+        cleanup_enabled = self.config.get("cleanup_enabled", True)
 
-        # 1. Try Single-Pass Ultra-Fast Gemini
-        api_key = self.config.get("gemini_api_key")
-        if api_key:
+        # 1. Local AI Engine (RTX 4060 Ti CUDA)
+        if provider == "local":
             try:
-                cleaned = self._single_pass_gemini(wav_bytes)
-                if cleaned:
-                    return cleaned, cleaned
+                return self.local_engine.transcribe_and_cleanup(
+                    audio_data,
+                    sample_rate=sample_rate,
+                    language=lang,
+                    glossary=glossary,
+                    cleanup_enabled=cleanup_enabled
+                )
             except Exception as e:
-                print(f"Gemini single-pass failed: {e}")
+                print(f"Local AI Engine execution error: {e}")
+                # Fallback to Gemini if API key exists
+                if self.config.get("gemini_api_key"):
+                    print("Falling back to Gemini Flash...")
+                    wav_bytes = self.audio_to_wav_bytes(audio_data, sample_rate)
+                    cleaned = self._single_pass_gemini(wav_bytes)
+                    if cleaned:
+                        return cleaned, cleaned
 
-        # 2. Fallback to OpenAI if configured
-        if self.config.get("openai_api_key"):
-            try:
-                raw = self._transcribe_openai(wav_bytes)
-                cleaned = self._cleanup_openai(raw)
-                return raw, cleaned
-            except Exception as e:
-                print(f"OpenAI pipeline failed: {e}")
+        # 2. Single-Pass Ultra-Fast Gemini
+        elif provider == "gemini":
+            wav_bytes = self.audio_to_wav_bytes(audio_data, sample_rate)
+            api_key = self.config.get("gemini_api_key")
+            if api_key:
+                try:
+                    cleaned = self._single_pass_gemini(wav_bytes)
+                    if cleaned:
+                        return cleaned, cleaned
+                except Exception as e:
+                    print(f"Gemini single-pass failed: {e}")
+
+        # 3. OpenAI Whisper + GPT-4o-mini
+        elif provider == "openai":
+            wav_bytes = self.audio_to_wav_bytes(audio_data, sample_rate)
+            if self.config.get("openai_api_key"):
+                try:
+                    raw = self._transcribe_openai(wav_bytes)
+                    cleaned = self._cleanup_openai(raw) if cleanup_enabled else raw
+                    return raw, cleaned
+                except Exception as e:
+                    print(f"OpenAI pipeline failed: {e}")
 
         return "", ""
 
