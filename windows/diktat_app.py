@@ -231,6 +231,19 @@ class AudioRecorder:
     def start(self):
         self.audio_chunks = []
         self.is_recording = True
+        
+        # Check default input device availability
+        try:
+            default_dev = sd.default.device
+            if default_dev[0] == -1 or default_dev[0] is None:
+                devices = sd.query_devices()
+                valid_in = [i for i, d in enumerate(devices) if d.get('max_input_channels', 0) > 0 and d.get('hostapi', 0) in (0, 1, 2)]
+                if not valid_in:
+                    raise RuntimeError("Windows'ta aktif mikrofon bulunamadı! Lütfen mikrofonunuzu bağlayın veya Ses Ayarlarından etkinleştirin.")
+        except Exception as check_err:
+            if "aktif mikrofon bulunamadı" in str(check_err):
+                raise check_err
+
         try:
             self.stream = sd.InputStream(
                 samplerate=self.sample_rate,
@@ -241,14 +254,17 @@ class AudioRecorder:
             )
             self.stream.start()
         except Exception:
-            self.stream = sd.InputStream(
-                samplerate=self.sample_rate,
-                channels=2,
-                dtype='float32',
-                callback=self._audio_callback_stereo,
-                blocksize=1024
-            )
-            self.stream.start()
+            try:
+                self.stream = sd.InputStream(
+                    samplerate=self.sample_rate,
+                    channels=2,
+                    dtype='float32',
+                    callback=self._audio_callback_stereo,
+                    blocksize=1024
+                )
+                self.stream.start()
+            except Exception:
+                raise RuntimeError("Mikrofon başlatılamadı! Windows Ses Ayarlarından veya Gizlilik İzinlerinden mikrofonun açık olduğundan emin olun.")
 
     def _audio_callback(self, indata, frames, time_info, status):
         if self.is_recording:
