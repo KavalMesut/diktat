@@ -61,7 +61,8 @@ run_diktat.bat
 
 ## 🗺️ Yol Haritası / Gelecek Planları (Roadmap & To-Do)
 
-- [x] **%100 Çevrimdışı / Yerel Mod (Offline Local STT & LLM)**: `faster-whisper (large-v3-turbo)` + dahili `Qwen 2.5 3B 4-bit GGUF` (llama-cpp CUDA) entegrasyonu tamamlandı.
+- [x] **%100 Çevrimdışı / Yerel Mod (Offline Local STT & LLM)**: `faster-whisper (large-v3-turbo)` + dahili `Qwen 2.5 3B / Qwen3 4B 4-bit GGUF` (llama-cpp CUDA) ve dinamik A/B test desteği tamamlandı.
+- [ ] **🧠 Dinamik Kullanıcı Hafızası & Kişiselleştirme (Stephen Hawking / ACAT Modeli)**: Kullanıcı dikte ettikçe en çok kullandığı teknik terimleri, özel isimleri ve konuşma kalıplarını yerel olarak öğrenen, kişisel sözlüğü Whisper ve LLM istemine dinamik olarak enjekte eden ve kullanıcı düzeltmelerini hafızaya kaydeden akıllı öğrenme motoru.
 - [ ] **Hibrit Mod (Yerel Whisper STT + Bulut Gemini Flash-Lite LLM)**: Ses tanımanın yerel GPU'da (`faster-whisper`), yalnızca metin temizleme ve imla düzenleme işleminin bulutta ultra hafif `Gemini 3.5 / 3.7 Flash-Lite` ile yapıldığı hibrit sağlayıcı modu.
 - [ ] **Çoklu API Sağlayıcıları & Akıllı Fallback**: OpenAI Whisper, Groq, Anthropic Claude ve DeepSeek API entegrasyonu.
 - [ ] **Bas-Konuş (Push-to-Talk) Modu**: Tuşa basılı tutulduğu sürece kaydedip bırakınca anında yapıştırma seçeneği.
