@@ -50,9 +50,52 @@ class LocalAIEngine:
         p.mkdir(parents=True, exist_ok=True)
         return p
 
-    def get_llm_path(self) -> Path:
-        p = self.get_models_dir() / "llm" / "qwen2.5-3b-instruct-q4_k_m.gguf"
-        return p
+    def get_llm_path(self, model_key: str = None) -> Path:
+        key = model_key or self.config.get("local_llm_model", "qwen2.5-3b")
+        llm_dir = self.get_models_dir() / "llm"
+        
+        if key == "qwen3-4b":
+            p4b = llm_dir / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+            if p4b.exists():
+                return p4b
+        
+        # Default / fallback to Qwen 2.5 3B
+        p3b = llm_dir / "qwen2.5-3b-instruct-q4_k_m.gguf"
+        if p3b.exists():
+            return p3b
+        
+        # Fallback to any gguf in directory
+        for f in llm_dir.glob("*.gguf"):
+            return f
+        return p3b
+
+    def get_available_llm_models(self) -> list[dict]:
+        """Returns list of available local LLM models and their status."""
+        llm_dir = self.get_models_dir() / "llm"
+        p3b = llm_dir / "qwen2.5-3b-instruct-q4_k_m.gguf"
+        p4b = llm_dir / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
+        return [
+            {
+                "id": "qwen2.5-3b",
+                "name": "Qwen 2.5 3B Instruct (4-bit Q4_K_M) - Hafif & Hızlı",
+                "available": p3b.exists(),
+                "path": str(p3b)
+            },
+            {
+                "id": "qwen3-4b",
+                "name": "Qwen3 4B Instruct 2507 (4-bit Q4_K_M) - Yüksek Doğruluk",
+                "available": p4b.exists(),
+                "path": str(p4b)
+            }
+        ]
+
+    def reload_llm(self, model_key: str = None):
+        """Cleanly reloads LLM into VRAM when user switches model."""
+        with self._load_lock:
+            if model_key:
+                self.config["local_llm_model"] = model_key
+            self.llm_model = None
+            self._ensure_models_loaded()
 
     def is_available(self) -> bool:
         """Check if local dependencies and models are present."""
@@ -103,6 +146,7 @@ class LocalAIEngine:
                 try:
                     llm_path = self.get_llm_path()
                     if llm_path.exists():
+                        print(f"Loading local LLM into VRAM: {llm_path.name}")
                         self.llm_model = llama_cpp.Llama(
                             model_path=str(llm_path),
                             n_gpu_layers=-1,  # Offload all layers to RTX 4060 Ti GPU

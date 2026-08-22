@@ -471,7 +471,7 @@ class SettingsDialog(QDialog):
         api_layout.addWidget(QLabel("Model Sağlayıcı:"))
         self.combo_provider = QComboBox()
         self.combo_provider.addItems([
-            "⚡ Yerel AI (RTX 4060 Ti: Faster-Whisper + Qwen 2.5 3B) - Çevrimdışı",
+            "⚡ Yerel AI (RTX 4060 Ti: Faster-Whisper + Qwen) - Çevrimdışı",
             "✨ Google Gemini 3.7 Flash (Bulut)",
             "🌐 OpenAI Whisper + GPT-4o-mini (Bulut)"
         ])
@@ -484,7 +484,20 @@ class SettingsDialog(QDialog):
             self.combo_provider.setCurrentIndex(2)
         api_layout.addWidget(self.combo_provider)
 
-        api_layout.addWidget(QLabel("Gemini API Anahtarı (Bulut Modu İçin):"))
+        # Local LLM Model Selector for A/B Testing
+        self.lbl_local_model = QLabel("Yerel Düzeltme Modeli (A/B Test):")
+        api_layout.addWidget(self.lbl_local_model)
+        self.combo_local_model = QComboBox()
+        self.combo_local_model.addItems([
+            "⚡ Qwen 2.5 3B Instruct (4-bit Q4_K_M) - Hızlı & Hafif",
+            "🚀 Qwen3 4B Instruct 2507 (4-bit Q4_K_M) - Yüksek Doğruluk"
+        ])
+        current_model = self.config_mgr.get("local_llm_model", "qwen2.5-3b")
+        self.combo_local_model.setCurrentIndex(1 if current_model == "qwen3-4b" else 0)
+        api_layout.addWidget(self.combo_local_model)
+
+        self.lbl_gemini = QLabel("Gemini API Anahtarı (Bulut Modu İçin):")
+        api_layout.addWidget(self.lbl_gemini)
         self.txt_gemini = QLineEdit(self.config_mgr.get("gemini_api_key", ""))
         self.txt_gemini.setEchoMode(QLineEdit.EchoMode.Password)
         self.txt_gemini.setPlaceholderText("Yerel AI modunda anahtar gerekmez...")
@@ -493,6 +506,9 @@ class SettingsDialog(QDialog):
         self.lbl_local_status = QLabel("⚡ RTX 4060 Ti GPU (CUDA) devrede: %100 Çevrimdışı ve Limitsiz.")
         self.lbl_local_status.setStyleSheet("color: #00B7CD; font-size: 11px; font-weight: 500;")
         api_layout.addWidget(self.lbl_local_status)
+
+        self.combo_provider.currentIndexChanged.connect(self._on_provider_changed)
+        self._on_provider_changed(self.combo_provider.currentIndex())
 
         layout.addWidget(api_group)
 
@@ -648,6 +664,19 @@ class SettingsDialog(QDialog):
         langs = ["tr", "en", "auto"]
         self.config_mgr.set("language", langs[self.combo_lang.currentIndex()])
 
+        # Save selected Local LLM Model (A/B Test)
+        chosen_local_model = "qwen3-4b" if self.combo_local_model.currentIndex() == 1 else "qwen2.5-3b"
+        old_local_model = self.config_mgr.get("local_llm_model", "qwen2.5-3b")
+        self.config_mgr.set("local_llm_model", chosen_local_model)
+        
+        # If local model changed, reload in background
+        if chosen_local_model != old_local_model and chosen_provider == "local":
+            try:
+                from .local_engine import LocalAIEngine
+                threading.Thread(target=lambda: LocalAIEngine.get_instance().reload_llm(chosen_local_model), daemon=True).start()
+            except Exception as e:
+                print(f"Error reloading local LLM: {e}")
+
         corners = ["bottom-right", "bottom-left", "top-right", "top-left"]
         self.config_mgr.set("overlay_corner", corners[self.combo_corner.currentIndex()])
 
@@ -661,6 +690,17 @@ class SettingsDialog(QDialog):
         self.config_mgr.set("play_sound", self.chk_sound.isChecked())
         self.config_mgr.set("glossary", self.txt_glossary.text().strip())
         self.accept()
+
+    def _on_provider_changed(self, index: int):
+        is_local = (index == 0)
+        is_gemini = (index == 1)
+
+        self.lbl_local_model.setVisible(is_local)
+        self.combo_local_model.setVisible(is_local)
+        self.lbl_local_status.setVisible(is_local)
+
+        self.lbl_gemini.setVisible(is_gemini)
+        self.txt_gemini.setVisible(is_gemini)
 
 # ---------------------------------------------------------
 # Main Diktat Background Controller

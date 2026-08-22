@@ -24,7 +24,7 @@ def download_models():
     print("Faster-Whisper (large-v3-turbo) successfully initialized on CUDA!")
 
     print("\n==================================================")
-    print("2/2: Downloading Qwen 2.5 3B Instruct 4-bit GGUF...")
+    print("2/3: Downloading Qwen 2.5 3B Instruct 4-bit GGUF...")
     print("==================================================")
     qwen_path = hf_hub_download(
         repo_id="Qwen/Qwen2.5-3B-Instruct-GGUF",
@@ -33,7 +33,17 @@ def download_models():
     )
     print(f"Qwen 2.5 3B GGUF downloaded to: {qwen_path}")
 
-    print("\nAll local AI models downloaded and verified successfully!")
+    print("\n==================================================")
+    print("3/3: Downloading Qwen3 4B Instruct 2507 4-bit GGUF...")
+    print("==================================================")
+    qwen3_path = hf_hub_download(
+        repo_id="unsloth/Qwen3-4B-Instruct-2507-GGUF",
+        filename="Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
+        local_dir=str(models_dir / "llm")
+    )
+    print(f"Qwen3 4B GGUF downloaded to: {qwen3_path}")
+
+    print("\nAll local AI models (Whisper + Qwen 2.5 3B + Qwen3 4B) downloaded and verified successfully!")
 
 if __name__ == "__main__":
     download_models()
