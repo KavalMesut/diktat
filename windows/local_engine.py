@@ -177,9 +177,9 @@ class LocalAIEngine:
 
         lang_arg = None if language == "auto" else language
         
-        # Turkish-optimized priming prompt to guide capitalization, punctuation, and 1st person possessive suffixes
+        # Turkish-optimized priming prompt to guide capitalization, punctuation, and standard verb suffixes
         if language == "tr":
-            base_prompt = "Merhaba. Diktat ile Türkçe sesli dikte yapıyorum: yaptıklarım, söylediklerim, fikrim, gördüğüm, projem. Noktalama işaretlerine, büyük/küçük harflere ve Türkçe karakterlere (ç, ğ, ı, ö, ş, ü, -m/-n ekleri) dikkat et."
+            base_prompt = "Merhaba. Diktat ile Türkçe sesli dikte yapıyorum: yaptıklarım, söylediklerim, bilmiyorum, geliyorum, fikrim, gördüğüm, projem. Noktalama işaretlerine, büyük/küçük harflere ve Türkçe karakterlere (ç, ğ, ı, ö, ş, ü, -m/-n ekleri) dikkat et."
             prompt_arg = f"{base_prompt} {glossary}".strip() if glossary else base_prompt
         elif language == "en":
             base_prompt = "Hello. Dictating in English with correct capitalization and punctuation."
