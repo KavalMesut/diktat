@@ -227,10 +227,12 @@ class AudioRecorder:
         self.is_recording = False
         self.audio_chunks = []
         self.stream = None
+        self.actual_samplerate = sample_rate
 
     def start(self):
         self.audio_chunks = []
         self.is_recording = True
+        self.actual_samplerate = self.sample_rate
         
         # Check default input device availability
         try:
@@ -244,27 +246,30 @@ class AudioRecorder:
             if "aktif mikrofon bulunamadı" in str(check_err):
                 raise check_err
 
-        try:
-            self.stream = sd.InputStream(
-                samplerate=self.sample_rate,
-                channels=1,
-                dtype='float32',
-                callback=self._audio_callback,
-                blocksize=1024
-            )
-            self.stream.start()
-        except Exception:
-            try:
-                self.stream = sd.InputStream(
-                    samplerate=self.sample_rate,
-                    channels=2,
-                    dtype='float32',
-                    callback=self._audio_callback_stereo,
-                    blocksize=1024
-                )
-                self.stream.start()
-            except Exception:
-                raise RuntimeError("Mikrofon başlatılamadı! Windows Ses Ayarlarından veya Gizlilik İzinlerinden mikrofonun açık olduğundan emin olun.")
+        # Universal fallback for sample rate and channel layout (e.g. XMOS XVF3800, ReSpeaker, etc.)
+        stream_opened = False
+        for sr in [self.sample_rate, None, 48000, 44100]:
+            for ch in [1, 2]:
+                try:
+                    cb = self._audio_callback if ch == 1 else self._audio_callback_stereo
+                    self.stream = sd.InputStream(
+                        samplerate=sr,
+                        channels=ch,
+                        dtype='float32',
+                        callback=cb,
+                        blocksize=1024
+                    )
+                    self.stream.start()
+                    self.actual_samplerate = int(self.stream.samplerate)
+                    stream_opened = True
+                    break
+                except Exception:
+                    continue
+            if stream_opened:
+                break
+
+        if not stream_opened:
+            raise RuntimeError("Mikrofon başlatılamadı! Windows Ses Ayarlarından veya Gizlilik İzinlerinden mikrofonun açık olduğundan emin olun.")
 
     def _audio_callback(self, indata, frames, time_info, status):
         if self.is_recording:
@@ -295,7 +300,19 @@ class AudioRecorder:
                 pass
             self.stream = None
         if self.audio_chunks:
-            return np.concatenate(self.audio_chunks, axis=0).flatten()
+            audio = np.concatenate(self.audio_chunks, axis=0).flatten()
+            # If hardware recorded at a native rate (e.g. 48000 Hz on XVF3800), cleanly resample to 16000 Hz for Whisper
+            if self.actual_samplerate != self.sample_rate and len(audio) > 0:
+                try:
+                    import scipy.signal
+                    import math
+                    gcd = math.gcd(self.sample_rate, self.actual_samplerate)
+                    up = self.sample_rate // gcd
+                    down = self.actual_samplerate // gcd
+                    audio = scipy.signal.resample_poly(audio, up, down).astype(np.float32)
+                except Exception as e:
+                    print(f"Resample warning: {e}")
+            return audio
         return np.array([], dtype='float32')
 
 # ---------------------------------------------------------
