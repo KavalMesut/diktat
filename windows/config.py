@@ -102,7 +102,7 @@ DEFAULT_CONFIG = {
     "gemini_api_key": os.environ.get("GEMINI_API_KEY", ""),
     "openai_api_key": os.environ.get("OPENAI_API_KEY", ""),
     "provider": "local",  # "local", "gemini", or "openai"
-    "local_llm_model": "qwen2.5-3b",  # "qwen2.5-3b" or "qwen3-4b"
+    "local_llm_model": "gemma-3-4b",  # "gemma-3-4b", "qwen2.5-3b", or "qwen3-4b"
     "language": "tr",       # "tr", "en", "auto"
     "ui_language": "tr",
     "hotkey": "ctrl+space",

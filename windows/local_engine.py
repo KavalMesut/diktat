@@ -51,30 +51,44 @@ class LocalAIEngine:
         return p
 
     def get_llm_path(self, model_key: str = None) -> Path:
-        key = model_key or self.config.get("local_llm_model", "qwen2.5-3b")
+        key = model_key or self.config.get("local_llm_model", "gemma-3-4b")
         llm_dir = self.get_models_dir() / "llm"
         
-        if key == "qwen3-4b":
+        if key == "gemma-3-4b":
+            pgemma = llm_dir / "gemma-3-4b-it-Q4_K_M.gguf"
+            if pgemma.exists():
+                return pgemma
+        elif key == "qwen3-4b":
             p4b = llm_dir / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
             if p4b.exists():
                 return p4b
+        elif key == "qwen2.5-3b":
+            p3b = llm_dir / "qwen2.5-3b-instruct-q4_k_m.gguf"
+            if p3b.exists():
+                return p3b
         
-        # Default / fallback to Qwen 2.5 3B
-        p3b = llm_dir / "qwen2.5-3b-instruct-q4_k_m.gguf"
-        if p3b.exists():
-            return p3b
-        
-        # Fallback to any gguf in directory
+        # Fallback priority: Gemma 3 4B -> Qwen 2.5 3B -> Qwen3 4B -> Any GGUF
+        for fname in ["gemma-3-4b-it-Q4_K_M.gguf", "qwen2.5-3b-instruct-q4_k_m.gguf", "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"]:
+            p = llm_dir / fname
+            if p.exists():
+                return p
         for f in llm_dir.glob("*.gguf"):
             return f
-        return p3b
+        return llm_dir / "gemma-3-4b-it-Q4_K_M.gguf"
 
     def get_available_llm_models(self) -> list[dict]:
         """Returns list of available local LLM models and their status."""
         llm_dir = self.get_models_dir() / "llm"
+        pgemma = llm_dir / "gemma-3-4b-it-Q4_K_M.gguf"
         p3b = llm_dir / "qwen2.5-3b-instruct-q4_k_m.gguf"
         p4b = llm_dir / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
         return [
+            {
+                "id": "gemma-3-4b",
+                "name": "Google Gemma 3 4B Instruct (4-bit Q4_K_M) - Disiplinli & Doğru (Önerilen)",
+                "available": pgemma.exists(),
+                "path": str(pgemma)
+            },
             {
                 "id": "qwen2.5-3b",
                 "name": "Qwen 2.5 3B Instruct (4-bit Q4_K_M) - Hafif & Hızlı",
@@ -83,7 +97,7 @@ class LocalAIEngine:
             },
             {
                 "id": "qwen3-4b",
-                "name": "Qwen3 4B Instruct 2507 (4-bit Q4_K_M) - Yüksek Doğruluk",
+                "name": "Qwen3 4B Instruct 2507 (4-bit Q4_K_M) - Yüksek Kapasite",
                 "available": p4b.exists(),
                 "path": str(p4b)
             }
@@ -206,7 +220,22 @@ class LocalAIEngine:
         )
 
         texts = [segment.text.strip() for segment in segments if segment.text.strip()]
-        return " ".join(texts).strip()
+        raw_result = " ".join(texts).strip()
+
+        # Filter out stock Whisper hallucinations produced in near-silence
+        WHISPER_HALLUCINATIONS = {
+            "altyazi mk", "altyazi m k", "altyazi", "altyazilar", "abone olmayi unutmayin",
+            "izlediginiz icin tesekkurler", "izlediginiz icin tesekkur ederim", "izlediginiz icin tesekkur ederiz",
+            "kanalima abone olmayi unutmayin", "thanks for watching", "thank you for watching",
+            "thanks for watching!", "please subscribe", "subscribe to my channel"
+        }
+        normalized = "".join(c for c in raw_result.lower() if c.isalnum() or c.isspace()).strip()
+        normalized = normalized.replace("ı", "i").replace("ş", "s").replace("ğ", "g").replace("ü", "u").replace("ö", "o").replace("ç", "c")
+        if normalized in WHISPER_HALLUCINATIONS:
+            print(f"[Diktat] Whisper hayal ürünü kalıp cümle yakalandı ve elendi: '{raw_result}'")
+            return ""
+
+        return raw_result
 
     def cleanup_text(self, raw_text: str, language: str = "tr", glossary: str = "") -> str:
         if not raw_text or not raw_text.strip():
@@ -235,7 +264,7 @@ class LocalAIEngine:
                 top_p=0.9,
                 repeat_penalty=1.1,   # Prevents repetitive chat babble
                 max_tokens=512,
-                stop=["<|im_end|>", "<|endoftext|>", "\n\n", "<|im_start|>"]
+                stop=["<|im_end|>", "<|endoftext|>", "\n\n", "<|im_start|>", "<end_of_turn>"]
             )
             cleaned = response["choices"][0]["message"]["content"].strip()
             
@@ -250,20 +279,23 @@ class LocalAIEngine:
 
             # Anti-conversational hallucination guard
             hallucination_indicators = [
-                "özür dilerim", "üzgünüm", "verilen metni analiz", "yardımcı olabilirim",
-                "lütfen verilen metn", "nasıl yardımcı", "i apologize", "as an ai", "how can i help"
+                "özür dilerim", "üzgünüm", "verilen metni", "yardımcı olabilirim",
+                "lütfen verilen", "nasıl yardımcı", "tabii ki", "elbette", "merhaba",
+                "iyi günler", "anladım", "sorunuza", "i apologize", "as an ai",
+                "how can i help", "sure, i can", "here is the"
             ]
             lower_clean = cleaned.lower()
             lower_raw = raw_text.lower()
             is_hallucination = any(h in lower_clean and h not in lower_raw for h in hallucination_indicators)
 
-            if is_hallucination or (len(cleaned) > 2.5 * len(raw_text) and len(raw_text) > 10):
-                print(f"[Diktat] LLM sohbet halüsinasyonu yakalandı, ham ses dökümüne dönülüyor:\n  Ham: '{raw_text}'\n  LLM: '{cleaned}'")
+            # Strict divergence check: if LLM expands more than 80% or shrinks to nothing, fallback to raw Whisper
+            if is_hallucination or (len(cleaned) > 1.8 * len(raw_text) and len(raw_text) > 10) or (len(cleaned) < 0.25 * len(raw_text) and len(raw_text) > 20):
+                print(f"[Diktat] LLM sohbet/aşırı müdahale yakalandı, doğrudan ham sese dönülüyor:\n  Ham: '{raw_text}'\n  LLM: '{cleaned}'")
                 return raw_text
 
             return cleaned if cleaned else raw_text
         except Exception as e:
-            print(f"Local Qwen cleanup error: {e}")
+            print(f"Local LLM cleanup error: {e}")
             return raw_text
 
     def transcribe_and_cleanup(self, audio_data: np.ndarray, sample_rate: int = 16000, language: str = "tr", glossary: str = "", cleanup_enabled: bool = True) -> tuple[str, str]:

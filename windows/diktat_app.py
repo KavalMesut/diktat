@@ -485,15 +485,23 @@ class SettingsDialog(QDialog):
         api_layout.addWidget(self.combo_provider)
 
         # Local LLM Model Selector for A/B Testing
-        self.lbl_local_model = QLabel("Yerel Düzeltme Modeli (A/B Test):")
+        self.lbl_local_model = QLabel("Yerel Düzeltme Modeli:")
         api_layout.addWidget(self.lbl_local_model)
         self.combo_local_model = QComboBox()
         self.combo_local_model.addItems([
-            "⚡ Qwen 2.5 3B Instruct (4-bit Q4_K_M) - Hızlı & Hafif",
-            "🚀 Qwen3 4B Instruct 2507 (4-bit Q4_K_M) - Yüksek Doğruluk"
+            "⚡ Google Gemma 3 4B Instruct (4-bit Q4_K_M) - Disiplinli & Doğru (Önerilen)",
+            "⚡ Qwen 2.5 3B Instruct (4-bit Q4_K_M) - Hafif & Hızlı",
+            "🚀 Qwen3 4B Instruct 2507 (4-bit Q4_K_M) - Yüksek Kapasite"
         ])
-        current_model = self.config_mgr.get("local_llm_model", "qwen2.5-3b")
-        self.combo_local_model.setCurrentIndex(1 if current_model == "qwen3-4b" else 0)
+        current_model = self.config_mgr.get("local_llm_model", "gemma-3-4b")
+        if current_model == "gemma-3-4b":
+            self.combo_local_model.setCurrentIndex(0)
+        elif current_model == "qwen2.5-3b":
+            self.combo_local_model.setCurrentIndex(1)
+        elif current_model == "qwen3-4b":
+            self.combo_local_model.setCurrentIndex(2)
+        else:
+            self.combo_local_model.setCurrentIndex(0)
         api_layout.addWidget(self.combo_local_model)
 
         self.lbl_gemini = QLabel("Gemini API Anahtarı (Bulut Modu İçin):")
@@ -665,8 +673,10 @@ class SettingsDialog(QDialog):
         self.config_mgr.set("language", langs[self.combo_lang.currentIndex()])
 
         # Save selected Local LLM Model (A/B Test)
-        chosen_local_model = "qwen3-4b" if self.combo_local_model.currentIndex() == 1 else "qwen2.5-3b"
-        old_local_model = self.config_mgr.get("local_llm_model", "qwen2.5-3b")
+        model_keys = ["gemma-3-4b", "qwen2.5-3b", "qwen3-4b"]
+        idx = max(0, min(len(model_keys) - 1, self.combo_local_model.currentIndex()))
+        chosen_local_model = model_keys[idx]
+        old_local_model = self.config_mgr.get("local_llm_model", "gemma-3-4b")
         self.config_mgr.set("local_llm_model", chosen_local_model)
         
         # If local model changed, reload in background
