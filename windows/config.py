@@ -186,6 +186,8 @@ DEFAULT_CONFIG = {
     "glossary": "Kubernetes, Grafana, PyQt, OpenAI, Claude, Whisper, Gemini",
     "silence_db": -50.0,
     "sample_rate": 16000,
+    # "auto" uses the system default, while a saved device name pins a known microphone.
+    "input_device": "auto",
     "max_duration_seconds": 300,
     "cleanup_enabled": True
 }

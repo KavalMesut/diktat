@@ -7,7 +7,7 @@ from windows.prompts import CLEANUP_PROMPT_TR
 
 def test_pipeline():
     models_dir = get_app_dir() / "models"
-    llm_path = models_dir / "llm" / "qwen2.5-3b-instruct-q4_k_m.gguf"
+    llm_path = models_dir / "llm" / "gemma-3-4b-it-Q4_K_M.gguf"
     whisper_dir = models_dir / "whisper"
 
     print("1. Initializing Whisper on CUDA...")
@@ -15,14 +15,14 @@ def test_pipeline():
     whisper = WhisperModel("large-v3-turbo", device="cuda", compute_type="float16", download_root=str(whisper_dir))
     print(f"   Whisper loaded in {time.time() - t0:.2f}s")
 
-    print("\n2. Initializing Qwen 2.5 3B (4-bit) on CUDA (n_gpu_layers=-1)...")
+    print("\n2. Initializing Gemma 3 4B (4-bit) on CUDA (n_gpu_layers=-1)...")
     t0 = time.time()
     llm = llama_cpp.Llama(model_path=str(llm_path), n_gpu_layers=-1, n_ctx=2048, verbose=False)
-    print(f"   Qwen loaded in {time.time() - t0:.2f}s")
+    print(f"   Gemma loaded in {time.time() - t0:.2f}s")
 
-    # Test Qwen text cleanup
+    # Test Gemma text cleanup
     test_raw_text = "ıı ben şey bugün saat beşte toplantıya hani gidecektim ama yani iptal oldu"
-    print(f"\n3. Testing Qwen cleanup on text: '{test_raw_text}'")
+    print(f"\n3. Testing Gemma cleanup on text: '{test_raw_text}'")
     t0 = time.time()
     response = llm.create_chat_completion(
         messages=[

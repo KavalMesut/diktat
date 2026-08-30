@@ -2,7 +2,7 @@ import time
 import llama_cpp
 from windows.config import get_app_dir
 
-llm_path = get_app_dir() / "models" / "llm" / "qwen2.5-3b-instruct-q4_k_m.gguf"
+llm_path = get_app_dir() / "models" / "llm" / "gemma-3-4b-it-Q4_K_M.gguf"
 llm = llama_cpp.Llama(model_path=str(llm_path), n_gpu_layers=-1, n_ctx=2048, verbose=False)
 
 SYSTEM_PROMPT = """Sen bir sesli dikte yazım yardımcısısın. Kullanıcı mikrofona konuştuğunda oluşan ham ses dökümünü (<konusma> etiketi içinde) imla kurallarına uygun, temiz bir yazıya çevirirsin.

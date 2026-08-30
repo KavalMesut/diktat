@@ -10,6 +10,23 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 def send_ipc_command(command: str) -> bool:
     """Send command to running Diktat instance via local socket/named pipe."""
+    # On Linux, do not initialize Qt for a shortcut invocation.  KDE attaches
+    # a Wayland activation token to shortcut-launched GUI processes; creating a
+    # QCoreApplication here could consume that token and take focus away from
+    # the editor that should receive the final paste.
+    if sys.platform.startswith("linux"):
+        try:
+            import socket
+
+            ipc_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            ipc_socket.settimeout(0.4)
+            ipc_socket.connect("/tmp/diktat_ipc_socket")
+            ipc_socket.sendall((command + "\n").encode("utf-8"))
+            ipc_socket.close()
+            return True
+        except OSError:
+            pass
+
     try:
         from PyQt6.QtCore import QCoreApplication
         from PyQt6.QtNetwork import QLocalSocket

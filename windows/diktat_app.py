@@ -4,6 +4,7 @@ import time
 import shutil
 import threading
 import math
+import subprocess
 from pathlib import Path
 import numpy as np
 import sounddevice as sd
@@ -123,6 +124,33 @@ class AppSignals(QObject):
     error_occurred = pyqtSignal(str)
     text_processed = pyqtSignal(str, str)
 
+
+def enable_kwin_hud_positioning():
+    """Load the optional KWin helper when Diktat runs on KDE Wayland."""
+    if not sys.platform.startswith("linux") or not os.environ.get("WAYLAND_DISPLAY"):
+        return
+    qdbus = shutil.which("qdbus6")
+    script = Path(__file__).parent.parent / "kwin" / "contents" / "code" / "main.js"
+    if not qdbus or not script.exists():
+        return
+    name = "diktat-hud-position"
+    try:
+        loaded = subprocess.run(
+            [qdbus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.isScriptLoaded", name],
+            capture_output=True, text=True, timeout=1.5,
+        )
+        if loaded.stdout.strip().lower() != "true":
+            subprocess.run(
+                [qdbus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.loadScript", str(script), name],
+                timeout=1.5,
+            )
+            subprocess.run(
+                [qdbus, "org.kde.KWin", "/Scripting", "org.kde.kwin.Scripting.start"],
+                timeout=1.5,
+            )
+    except Exception as e:
+        print(f"KWin HUD positioning unavailable: {e}")
+
 # ---------------------------------------------------------
 # Corner Floating HUD
 # Theme Palette: #DF301C, #FF9100, #FFF1D1, #00B7CD
@@ -134,10 +162,16 @@ class FloatingHUD(QWidget):
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint |
             Qt.WindowType.WindowStaysOnTopHint |
-            Qt.WindowType.Tool
+            Qt.WindowType.Tool |
+            Qt.WindowType.WindowDoesNotAcceptFocus |
+            Qt.WindowType.WindowTransparentForInput
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        # Lets the KDE Wayland helper identify this otherwise frameless window.
+        self.setWindowTitle("Diktat HUD")
 
         self.state = "idle"
         self.status_text = "Hazır"
@@ -153,7 +187,14 @@ class FloatingHUD(QWidget):
         self.anim_timer.start(50)
 
     def reposition(self):
-        screen = QApplication.primaryScreen().geometry()
+        # On Wayland the compositor owns top-level positioning.  Calling move()
+        # here after KWin has placed the HUD can send it back to Qt's primary
+        # screen and, on some compositors, activate it.  The KWin helper is the
+        # sole positioning authority in this session.
+        if os.environ.get("WAYLAND_DISPLAY"):
+            return
+        # availableGeometry excludes panels/docks; this is especially important on KDE.
+        screen = QApplication.primaryScreen().availableGeometry()
         corner = self.config_mgr.get("overlay_corner", "bottom-right")
         margin_x = 30
         margin_y = 70
@@ -183,7 +224,6 @@ class FloatingHUD(QWidget):
         self.status_text = text
         if state == "recording":
             self.elapsed_seconds = 0
-            self.reposition()
             self.show()
         elif state in ["transcribing", "cleaning"]:
             self.show()
@@ -294,12 +334,32 @@ class FloatingHUD(QWidget):
 # Audio Recording Engine
 # ---------------------------------------------------------
 class AudioRecorder:
-    def __init__(self, sample_rate=16000):
+    def __init__(self, sample_rate=16000, device="auto"):
         self.sample_rate = sample_rate
+        self.device = device
         self.is_recording = False
         self.audio_chunks = []
         self.stream = None
         self.actual_samplerate = sample_rate
+
+    def _select_input_device(self):
+        """Return a stable microphone device when one is explicitly configured."""
+        requested = str(self.device or "auto").strip()
+        if requested.lower() in ("", "auto", "default"):
+            return None
+
+        try:
+            for index, info in enumerate(sd.query_devices()):
+                if info.get("max_input_channels", 0) <= 0:
+                    continue
+                if info.get("name", "").lower() == requested.lower():
+                    return index
+        except Exception:
+            pass
+
+        # A missing saved device should not prevent recording through the system default.
+        print(f"Configured microphone not found, using system default: {requested}")
+        return None
 
     def start(self):
         self.audio_chunks = []
@@ -318,6 +378,8 @@ class AudioRecorder:
             if "aktif mikrofon bulunamadı" in str(check_err):
                 raise check_err
 
+        input_device = self._select_input_device()
+
         # Universal fallback for sample rate and channel layout (e.g. XMOS XVF3800, ReSpeaker, etc.)
         stream_opened = False
         for sr in [self.sample_rate, None, 48000, 44100]:
@@ -325,6 +387,7 @@ class AudioRecorder:
                 try:
                     cb = self._audio_callback if ch == 1 else self._audio_callback_stereo
                     self.stream = sd.InputStream(
+                        device=input_device,
                         samplerate=sr,
                         channels=ch,
                         dtype='float32',
@@ -333,6 +396,11 @@ class AudioRecorder:
                     )
                     self.stream.start()
                     self.actual_samplerate = int(self.stream.samplerate)
+                    print(
+                        f"[Diktat] Recording from device={self.stream.device}, "
+                        f"rate={self.actual_samplerate} Hz, channels={ch}",
+                        flush=True,
+                    )
                     stream_opened = True
                     break
                 except Exception:
@@ -341,7 +409,7 @@ class AudioRecorder:
                 break
 
         if not stream_opened:
-            raise RuntimeError("Mikrofon başlatılamadı! Windows Ses Ayarlarından veya Gizlilik İzinlerinden mikrofonun açık olduğundan emin olun.")
+            raise RuntimeError("Mikrofon başlatılamadı. Ses Ayarları ve mikrofon izinlerini kontrol edin.")
 
     def _audio_callback(self, indata, frames, time_info, status):
         if self.is_recording:
@@ -384,6 +452,21 @@ class AudioRecorder:
                     audio = scipy.signal.resample_poly(audio, up, down).astype(np.float32)
                 except Exception as e:
                     print(f"Resample warning: {e}")
+            # Far-field USB arrays can deliver a very conservative capture level.
+            # Normalize quiet speech before Whisper/VAD, while preserving headroom.
+            rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) else 0.0
+            peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
+            print(
+                f"[Diktat] Captured {len(audio)} samples; rms={rms:.6f}, peak={peak:.6f}",
+                flush=True,
+            )
+            if rms > 1e-5 and rms < 0.04:
+                gain = min(40.0, 0.08 / rms)
+                audio = np.clip(audio * gain, -0.98, 0.98).astype(np.float32)
+                print(
+                    f"[Diktat] Quiet microphone signal normalized: {rms:.5f} -> gain {gain:.1f}x",
+                    flush=True,
+                )
             return audio
         return np.array([], dtype='float32')
 
@@ -811,7 +894,10 @@ class DiktatApplication:
 
         self.config_mgr = ConfigManager()
         self.signals = AppSignals()
-        self.recorder = AudioRecorder(sample_rate=self.config_mgr.get("sample_rate", 16000))
+        self.recorder = AudioRecorder(
+            sample_rate=self.config_mgr.get("sample_rate", 16000),
+            device=self.config_mgr.get("input_device", "auto"),
+        )
         self.ai_client = AIClient(self.config_mgr.config)
 
         # Preload local models in background if provider is local
@@ -820,6 +906,7 @@ class DiktatApplication:
             LocalAIEngine.get_instance(self.config_mgr.config).preload_in_background()
 
         self.hud = FloatingHUD(self.config_mgr)
+        enable_kwin_hud_positioning()
 
         self.is_recording = False
         self.is_processing = False

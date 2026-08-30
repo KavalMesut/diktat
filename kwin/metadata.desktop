@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=Diktat HUD Position
+Comment=Places Diktat's recording indicator in the bottom-right corner on KDE Wayland
+Type=Service
+X-KDE-ServiceTypes=KWin/Script
+X-KDE-PluginInfo-Author=Mesut Kaval
+X-KDE-PluginInfo-Email=
+X-KDE-PluginInfo-Name=diktat-hud-position
+X-KDE-PluginInfo-Version=1.0
+X-KDE-PluginInfo-Website=
+X-KDE-PluginInfo-License=MIT
+X-Plasma-API=javascript
+X-Plasma-MainScript=code/main.js

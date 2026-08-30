@@ -49,10 +49,12 @@ source venv/bin/activate
 echo -e "\n[3/5] Python kütüphaneleri ve CUDA hızlandırması kuruluyor..."
 pip install --upgrade pip setuptools wheel
 
-# NVIDIA GPU ve CUDA tespiti
-if command -v nvidia-smi &> /dev/null; then
+# NVIDIA GPU ve çalışan sürücü tespiti
+if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
     echo "⚡ NVIDIA GPU tespit edildi! llama-cpp-python CUDA desteğiyle derleniyor..."
     CMAKE_ARGS="-DGGML_CUDA=on" pip install --no-cache-dir llama-cpp-python
+    # Faster-Whisper/CTranslate2 loads these shared libraries at runtime.
+    pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
 else
     echo "ℹ️ Standart CPU kurulumu yapılıyor..."
     pip install llama-cpp-python

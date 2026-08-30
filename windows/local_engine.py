@@ -37,7 +37,8 @@ class LocalAIEngine:
         self.whisper_model = None
         self.llm_model = None
         self._is_loading = False
-        self._load_lock = threading.Lock()
+        self._whisper_lock = threading.Lock()
+        self._llm_lock = threading.Lock()
         self._ready_event = threading.Event()
 
     def get_models_dir(self) -> Path:
@@ -105,11 +106,11 @@ class LocalAIEngine:
 
     def reload_llm(self, model_key: str = None):
         """Cleanly reloads LLM into VRAM when user switches model."""
-        with self._load_lock:
+        with self._llm_lock:
             if model_key:
                 self.config["local_llm_model"] = model_key
             self.llm_model = None
-            self._ensure_models_loaded()
+        self._ensure_llm_loaded()
 
     def is_available(self) -> bool:
         """Check if local dependencies and models are present."""
@@ -118,34 +119,26 @@ class LocalAIEngine:
         return self.get_llm_path().exists()
 
     def preload_in_background(self):
-        """Asynchronously warm up and load models into VRAM."""
-        threading.Thread(target=self._ensure_models_loaded, daemon=True).start()
+        """Warm up transcription without making it wait for the optional LLM."""
+        threading.Thread(target=self._ensure_whisper_loaded, daemon=True).start()
 
-    def _ensure_models_loaded(self):
-        with self._load_lock:
-            if self.whisper_model is not None and self.llm_model is not None:
-                self._ready_event.set()
+    def _ensure_whisper_loaded(self):
+        with self._whisper_lock:
+            if self.whisper_model is not None:
                 return
-
             self._is_loading = True
-            models_dir = self.get_models_dir()
-
-            # 1. Load Whisper
-            if self.whisper_model is None and WhisperModel is not None:
+            if WhisperModel is not None:
                 try:
                     whisper_dir = self.get_whisper_dir()
-                    # Use CUDA if available, fallback to CPU
-                    device = "cuda"
-                    compute_type = "float16"
                     try:
                         self.whisper_model = WhisperModel(
                             "large-v3-turbo",
-                            device=device,
-                            compute_type=compute_type,
+                            device="cuda",
+                            compute_type="float16",
                             download_root=str(whisper_dir)
                         )
                     except Exception as e:
-                        print(f"Whisper CUDA init error, falling back to CPU: {e}")
+                        print(f"Whisper CUDA init error, falling back to CPU: {e}", flush=True)
                         self.whisper_model = WhisperModel(
                             "large-v3-turbo",
                             device="cpu",
@@ -153,35 +146,41 @@ class LocalAIEngine:
                             download_root=str(whisper_dir)
                         )
                 except Exception as e:
-                    print(f"Failed to load local Whisper: {e}")
+                    print(f"Failed to load local Whisper: {e}", flush=True)
+            self._is_loading = False
 
-            # 2. Load Qwen LLM
+    def _ensure_llm_loaded(self):
+        with self._llm_lock:
+            if self.llm_model is not None:
+                return
             if self.llm_model is None and llama_cpp is not None:
                 try:
                     llm_path = self.get_llm_path()
                     if llm_path.exists():
-                        print(f"Loading local LLM into VRAM: {llm_path.name}")
+                        gpu_layers = -1 if llama_cpp.llama_supports_gpu_offload() else 0
+                        print(
+                            f"Loading local LLM: {llm_path.name} (gpu_layers={gpu_layers})",
+                            flush=True,
+                        )
                         self.llm_model = llama_cpp.Llama(
                             model_path=str(llm_path),
-                            n_gpu_layers=-1,  # Offload all layers to RTX 4060 Ti GPU
+                            n_gpu_layers=gpu_layers,
                             n_ctx=2048,
                             verbose=False
                         )
-                        # Warm up 1 token
-                        self.llm_model.create_chat_completion(
-                            messages=[{"role": "user", "content": "hi"}],
-                            max_tokens=1
-                        )
                     else:
-                        print(f"Local Qwen model not found at: {llm_path}")
+                        print(f"Local LLM model not found at: {llm_path}", flush=True)
                 except Exception as e:
-                    print(f"Failed to load local Qwen LLM: {e}")
+                    print(f"Failed to load local LLM: {e}", flush=True)
 
-            self._is_loading = False
-            self._ready_event.set()
+    def _ensure_models_loaded(self):
+        """Compatibility helper for callers that explicitly need both models."""
+        self._ensure_whisper_loaded()
+        self._ensure_llm_loaded()
+        self._ready_event.set()
 
     def transcribe(self, audio_data: np.ndarray, sample_rate: int = 16000, language: str = "tr", glossary: str = "") -> str:
-        self._ensure_models_loaded()
+        self._ensure_whisper_loaded()
         if self.whisper_model is None:
             raise RuntimeError("Local Whisper model is not loaded.")
 
@@ -211,16 +210,14 @@ class LocalAIEngine:
             no_speech_threshold=0.6,
             language=lang_arg,
             initial_prompt=prompt_arg,
-            vad_filter=True,
-            vad_parameters=dict(
-                min_silence_duration_ms=350,
-                speech_pad_ms=200,
-                threshold=0.45
-            )
+            # The recorder has already removed only obvious silence.  Skipping
+            # a second VAD pass avoids discarding quiet far-field speech.
+            vad_filter=False,
         )
 
         texts = [segment.text.strip() for segment in segments if segment.text.strip()]
         raw_result = " ".join(texts).strip()
+        print(f"[Diktat] Whisper returned {len(raw_result)} characters", flush=True)
 
         # Filter out stock Whisper hallucinations produced in near-silence
         WHISPER_HALLUCINATIONS = {
@@ -241,7 +238,7 @@ class LocalAIEngine:
         if not raw_text or not raw_text.strip():
             return ""
 
-        self._ensure_models_loaded()
+        self._ensure_llm_loaded()
         if self.llm_model is None:
             return raw_text
 
