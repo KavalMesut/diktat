@@ -2,31 +2,61 @@ import os
 import sys
 import json
 import shutil
-import winreg
 from pathlib import Path
 from dataclasses import dataclass, asdict
+
+try:
+    import winreg
+except ImportError:
+    winreg = None
 
 REG_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 APP_REG_NAME = "Diktat"
 
 def get_app_dir() -> Path:
-    app_data = os.environ.get("APPDATA")
-    if app_data:
-        p = Path(app_data) / "Diktat"
-        # Migration from legacy "Dikte" directory if exists and Diktat does not
-        legacy_p = Path(app_data) / "Dikte"
-        if legacy_p.exists() and not p.exists():
-            try:
-                shutil.copytree(legacy_p, p)
-            except Exception:
-                pass
-    else:
+    """Returns the primary application data directory (models, logs, temp)."""
+    if sys.platform == "win32":
+        app_data = os.environ.get("APPDATA")
+        if app_data:
+            p = Path(app_data) / "Diktat"
+            # Migration from legacy "Dikte" directory if exists and Diktat does not
+            legacy_p = Path(app_data) / "Dikte"
+            if legacy_p.exists() and not p.exists():
+                try:
+                    shutil.copytree(legacy_p, p)
+                except Exception:
+                    pass
+        else:
+            p = Path.home() / ".config" / "diktat"
+    elif sys.platform.startswith("linux"):
+        xdg_data = os.environ.get("XDG_DATA_HOME")
+        if xdg_data:
+            p = Path(xdg_data) / "diktat"
+        else:
+            p = Path.home() / ".local" / "share" / "diktat"
+    else:  # macOS / other
         p = Path.home() / ".config" / "diktat"
+
     p.mkdir(parents=True, exist_ok=True)
     return p
 
+def get_config_dir() -> Path:
+    """Returns the configuration directory where config.json is stored."""
+    if sys.platform == "win32":
+        return get_app_dir()
+    elif sys.platform.startswith("linux"):
+        xdg_config = os.environ.get("XDG_CONFIG_HOME")
+        if xdg_config:
+            p = Path(xdg_config) / "diktat"
+        else:
+            p = Path.home() / ".config" / "diktat"
+        p.mkdir(parents=True, exist_ok=True)
+        return p
+    else:
+        return get_app_dir()
+
 def get_config_file() -> Path:
-    return get_app_dir() / "config.json"
+    return get_config_dir() / "config.json"
 
 def get_launch_command() -> str:
     """Returns the command line string to launch Diktat in the background on startup."""
@@ -34,8 +64,11 @@ def get_launch_command() -> str:
         return f'"{sys.executable}"'
     else:
         py_exe = sys.executable
-        pyw_exe = Path(py_exe).parent / "pythonw.exe"
-        runner_exe = str(pyw_exe) if pyw_exe.exists() else py_exe
+        if sys.platform == "win32":
+            pyw_exe = Path(py_exe).parent / "pythonw.exe"
+            runner_exe = str(pyw_exe) if pyw_exe.exists() else py_exe
+        else:
+            runner_exe = py_exe
         
         root_dir = Path(__file__).parent.parent
         main_script = root_dir / "diktat.py"
@@ -44,33 +77,71 @@ def get_launch_command() -> str:
         return f'"{runner_exe}" "{main_script.resolve()}"'
 
 def is_autostart_enabled() -> bool:
-    """Check if Diktat is registered in Windows startup registry."""
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_RUN_KEY, 0, winreg.KEY_READ) as key:
-            val, _ = winreg.QueryValueEx(key, APP_REG_NAME)
-            return bool(val)
-    except FileNotFoundError:
-        return False
-    except Exception as e:
-        print(f"Autostart check error: {e}")
-        return False
+    """Check if Diktat is registered in startup settings (Windows registry or Linux autostart)."""
+    if sys.platform == "win32" and winreg:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_RUN_KEY, 0, winreg.KEY_READ) as key:
+                val, _ = winreg.QueryValueEx(key, APP_REG_NAME)
+                return bool(val)
+        except FileNotFoundError:
+            return False
+        except Exception as e:
+            print(f"Autostart check error (Windows): {e}")
+            return False
+    elif sys.platform.startswith("linux"):
+        autostart_file = Path.home() / ".config" / "autostart" / "diktat.desktop"
+        return autostart_file.exists()
+    return False
 
 def set_autostart(enable: bool) -> bool:
-    """Add or remove Diktat from Windows startup registry."""
-    try:
-        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
-            if enable:
-                cmd = get_launch_command()
-                winreg.SetValueEx(key, APP_REG_NAME, 0, winreg.REG_SZ, cmd)
-            else:
-                try:
-                    winreg.DeleteValue(key, APP_REG_NAME)
-                except FileNotFoundError:
-                    pass
-        return True
-    except Exception as e:
-        print(f"Autostart set error: {e}")
-        return False
+    """Add or remove Diktat from startup settings (Windows registry or Linux autostart)."""
+    if sys.platform == "win32" and winreg:
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, REG_RUN_KEY, 0, winreg.KEY_SET_VALUE) as key:
+                if enable:
+                    cmd = get_launch_command()
+                    winreg.SetValueEx(key, APP_REG_NAME, 0, winreg.REG_SZ, cmd)
+                else:
+                    try:
+                        winreg.DeleteValue(key, APP_REG_NAME)
+                    except FileNotFoundError:
+                        pass
+            return True
+        except Exception as e:
+            print(f"Autostart set error (Windows): {e}")
+            return False
+    elif sys.platform.startswith("linux"):
+        autostart_dir = Path.home() / ".config" / "autostart"
+        autostart_dir.mkdir(parents=True, exist_ok=True)
+        desktop_file = autostart_dir / "diktat.desktop"
+        if enable:
+            cmd = get_launch_command().replace('"', '')
+            content = f"""[Desktop Entry]
+Type=Application
+Name=Diktat
+Comment=Zero-Friction AI Voice Dictation
+Exec={cmd}
+Icon=diktat
+Terminal=false
+Categories=Utility;AudioVideo;
+X-GNOME-Autostart-enabled=true
+"""
+            try:
+                with open(desktop_file, "w", encoding="utf-8") as f:
+                    f.write(content)
+                return True
+            except Exception as e:
+                print(f"Autostart write error (Linux): {e}")
+                return False
+        else:
+            try:
+                if desktop_file.exists():
+                    desktop_file.unlink()
+                return True
+            except Exception as e:
+                print(f"Autostart remove error (Linux): {e}")
+                return False
+    return False
 
 def load_env_file():
     """Load API keys from .env if present in bundle, current dir, exe dir or appdata."""
@@ -79,6 +150,7 @@ def load_env_file():
         Path(__file__).parent.parent / ".env",
         Path(sys.executable).parent / ".env" if getattr(sys, 'frozen', False) else None,
         Path(getattr(sys, '_MEIPASS', '')) / ".env" if getattr(sys, 'frozen', False) else None,
+        get_config_dir() / ".env",
         get_app_dir() / ".env"
     ]
     for p in candidates:
@@ -141,6 +213,7 @@ class ConfigManager:
 
     def save(self):
         try:
+            self.config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.config_path, "w", encoding="utf-8") as f:
                 json.dump(self.config, f, indent=2, ensure_ascii=False)
         except Exception as e:

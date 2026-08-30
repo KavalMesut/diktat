@@ -10,8 +10,10 @@ from .diktat_app import (
     AudioRecorder,
     GlobalKeyListener,
     AppSignals,
-    windows_paste,
+    platform_paste,
+    play_beep,
 )
+windows_paste = platform_paste
 
 if __name__ == "__main__":
     app = DiktatApplication()

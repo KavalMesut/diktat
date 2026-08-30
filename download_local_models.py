@@ -15,13 +15,23 @@ def download_models():
     print("==================================================")
     print("1/2: Downloading / Caching faster-whisper (large-v3-turbo)...")
     print("==================================================")
-    whisper_model = WhisperModel(
-        "large-v3-turbo",
-        device="cuda",
-        compute_type="float16",
-        download_root=str(models_dir / "whisper")
-    )
-    print("Faster-Whisper (large-v3-turbo) successfully initialized on CUDA!")
+    try:
+        whisper_model = WhisperModel(
+            "large-v3-turbo",
+            device="cuda",
+            compute_type="float16",
+            download_root=str(models_dir / "whisper")
+        )
+        print("Faster-Whisper (large-v3-turbo) successfully initialized on CUDA!")
+    except Exception as e:
+        print(f"CUDA initialization failed ({e}), falling back to CPU...")
+        whisper_model = WhisperModel(
+            "large-v3-turbo",
+            device="cpu",
+            compute_type="int8",
+            download_root=str(models_dir / "whisper")
+        )
+        print("Faster-Whisper (large-v3-turbo) initialized on CPU.")
 
     print("\n==================================================")
     print("2/4: Downloading Google Gemma 3 4B Instruct 4-bit GGUF (Primary Recommended)...")

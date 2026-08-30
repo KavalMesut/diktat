@@ -1,73 +1,79 @@
-# 🎙️ Diktat — Zero-Friction AI Voice Dictation for Windows
+# 🎙️ Diktat — Zero-Friction AI Voice Dictation (Cross-Platform)
 
 <p align="center">
   <img src="screenshots/ss1.png" alt="Diktat Ayarlar Arayüzü" width="520" />
 </p>
 
-**Diktat**, Windows üzerinde herhangi bir uygulamada (Word, VS Code, Not Defteri, WhatsApp, Chrome, Slack vb.) **`Ctrl + Space`** tuşuna basarak konuştuğunuz her şeyi anında yazıya döken ve yapay zeka ile otomatik temizleyerek imlecinizin durduğu yere yapıştıran ultra hızlı, hafif bir masaüstü asistanıdır.
+**Diktat**, **Windows 10/11** ve **Linux (CachyOS, Arch, Ubuntu/Debian)** üzerinde herhangi bir uygulamada (Word, VS Code, Not Defteri, WhatsApp, Chrome, Slack vb.) **`Ctrl + Space`** tuşuna basarak konuştuğunuz her şeyi anında yazıya döken ve yapay zeka ile otomatik temizleyerek imlecinizin durduğu yere yapıştıran ultra hızlı, hafif ve çoklu platform bir masaüstü asistanıdır.
 
 ---
 
 ## ✨ Özellikler
 
 - 🚀 **Sıfır Sürtünme (Zero Friction)**: Ekranda gereksiz pencereler açılmaz; arka planda sistem tepsisinde (System Tray) sessizce bekler.
-- 💻 **%100 Yerel AI Desteği (GPU / CUDA)**: NVIDIA RTX ekran kartınızda çalışan **`faster-whisper (large-v3-turbo)`** ve dahili **`Qwen 2.5 3B (4-bit GGUF)`** modelleri ile sıfır internet, sıfır kota ve maksimum gizlilik ile tam çevrimdışı çalışma.
-- 🎯 **Doğrudan İmlece Yapıştırma**: İmleciniz neredeyse oraya anında (`Ctrl + V`) yazar.
-- ⚡ **Ultra Hızlı Pipeline**: İster yerel GPU ister Gemini 3.7 Flash motoru ile konuşma biter bitmez milisaniyeler içinde metne çevrilir.
-- 🧹 **Akıllı Konuşma Temizleme**: "ıı", "şey", "yani", "hani" gibi düşünme seslerini, kekelemeleri ve tekrarları otomatik siler; noktalama işaretlerini ve büyük harfleri mükemmel ekler.
-- 🔄 **Windows ile Otomatik Başlatma**: Ayarlardan tek tıkla Windows başlangıcında otomatik ve arka planda çalışma desteği.
-- 📚 **Özel Terimler Sözlüğü (Glossary)**: Kodlama dilleri, teknik kavramlar (örn. *Kubernetes, Grafana, PyQt, Claude*) ve özel isimleri doğru yazar.
-- 🔔 **Sesli & Görsel Geri Bildirim**: Kayıt başladığında/bittiğinde zarif bir bip sesi çalar ve ekranın köşesinde modern temalı mini kayıt göstergesi belirir.
+- 🐧 **Tam Linux & CachyOS Desteği**: PipeWire, Wayland (KDE Plasma, Hyprland, GNOME) ve X11 üzerinde yerel Linux desteği. Kısayol tetikleme için `diktat --toggle` IPC soketi.
+- 💻 **%100 Yerel AI Desteği (GPU / CUDA)**: NVIDIA RTX ekran kartınızda çalışan **`faster-whisper (large-v3-turbo)`** ve **`Google Gemma 3 4B Instruct (4-bit GGUF)`** modelleri ile sıfır internet, sıfır kota ve maksimum gizlilik ile tam çevrimdışı çalışma.
+- 🎙️ **ReSpeaker XMOS XVF3800 & Far-Field DSP Uyumlu**: Otomatik örnekleme oranı tespiti ve 48 kHz polifaz resampling ile donanımsal gürültü engellemeli mikrofonlarla kusursuz uyum.
+- 🎯 **Doğrudan İmlece Yapıştırma**: İmleciniz neredeyse oraya anında (`Ctrl + V`, `wtype`, `xdotool`) yazar.
+- 🧹 **Akıllı Konuşma Temizleme (YAP/YAPMA Mimarisi)**: "ıı", "şey", "yani", "hani" gibi düşünme seslerini siler; soru kalıplarına cevap vermez, metne sadık kalarak noktalama işaretlerini ve büyük harfleri ekler.
+- 🔄 **Otomatik Başlatma**: Windows Başlangıç veya Linux Autostart (`~/.config/autostart`) desteği.
+- 📚 **Özel Terimler Sözlüğü (Glossary)**: Kodlama dilleri, teknik kavramlar ve özel isimleri doğru yazar.
+- 🔔 **Sesli & Görsel Geri Bildirim**: Kayıt başladığında/bittiğinde zarif bir ses çalar ve ekranın köşesinde modern mini kayıt göstergesi belirir.
 
 ---
 
-## ⌨️ Kısayol Tuşları
+## ⌨️ Kısayol Tuşları & Komutlar
 
-| Kısayol | İşlem |
-|---|---|
-| **`Ctrl + Space`** | Diktatı Başlat / Durdur & Yapıştır |
-| **`Ctrl + Alt + Space`** | Diktatı İptal Et |
+| Kısayol / Komut | Platform | İşlem |
+|---|---|---|
+| **`Ctrl + Space`** | Windows / Linux X11 | Diktatı Başlat / Durdur & Yapıştır |
+| **`Ctrl + Alt + Space`** | Windows / Linux X11 | Diktatı İptal Et |
+| **`diktat --toggle`** | Linux (Wayland / Hyprland / KDE) | Arka plandaki Diktat kaydını aç/kapa |
+| **`diktat --cancel`** | Linux (CLI) | Kaydı iptal et |
+| **`diktat --settings`** | Tüm Platformlar | Ayarlar penceresini aç |
 
 ---
 
 ## 🚀 Hızlı Başlangıç
 
-### 1. Gereksinimler
-- Windows 10 / 11
-- Python 3.10+
-- NVIDIA Ekran Kartı (RTX 4060 Ti veya benzeri CUDA destekli GPU) veya Bulut API Anahtarı
+### 🐧 Linux (CachyOS / Arch / Ubuntu) Kurulumu:
+```bash
+git clone https://github.com/KavalMesut/diktat.git
+cd diktat
 
-### 2. Kurulum
+# CachyOS / Arch için tek komutla tam kurulum:
+chmod +x install_cachyos.sh
+./install_cachyos.sh
+
+# Başlatmak için:
+./run_diktat.sh
+```
+
+> **Hyprland / KDE Plasma Wayland Kısayol Ayarı:**  
+> Kısayol yöneticinize komut olarak `~/.local/share/applications/diktat/run_diktat.sh --toggle` (veya `diktat --toggle`) atayarak dilediğiniz tuş kombinasyonuyla (`Super+D`, `Ctrl+Space`) tetikleyebilirsiniz.
+
+---
+
+### 🪟 Windows Kurulumu:
 ```bash
 git clone https://github.com/KavalMesut/diktat.git
 cd diktat
 
 pip install -r requirements.txt
-```
-
-### 3. Modelleri İndirme (Yerel Mod İçin)
-```bash
 python download_local_models.py
-```
-
-### 4. Çalıştırma
-```bash
 python diktat.py
-# veya
-run_diktat.bat
 ```
 
 ---
 
-## 🗺️ Yol Haritası / Gelecek Planları (Roadmap & To-Do)
+## 🗺️ Yol Haritası (Roadmap)
 
-- [x] **%100 Çevrimdışı / Yerel Mod (Offline Local STT & LLM)**: `faster-whisper (large-v3-turbo)` + dahili `Qwen 2.5 3B / Qwen3 4B 4-bit GGUF` (llama-cpp CUDA) ve dinamik A/B test desteği tamamlandı.
-- [ ] **🧠 Dinamik Kullanıcı Hafızası & Kişiselleştirme (Stephen Hawking / ACAT Modeli)**: Kullanıcı dikte ettikçe en çok kullandığı teknik terimleri, özel isimleri ve konuşma kalıplarını yerel olarak öğrenen, kişisel sözlüğü Whisper ve LLM istemine dinamik olarak enjekte eden ve kullanıcı düzeltmelerini hafızaya kaydeden akıllı öğrenme motoru.
-- [ ] **🎙️ ReSpeaker Lite 2 Donanım & Uzak Alan (Far-Field) Ses Profili**: ReSpeaker Lite (XMOS DSP / 2-mic beamforming) aygıtı için gürültülü ortamlarda ve uzak mesafeden diktede ses karakteristiğine özel VAD (Voice Activity Detection) kalibrasyonu, dinamik ses normalizasyonu ve uzak alan kazanç optimizasyonu.
-- [ ] **Hibrit Mod (Yerel Whisper STT + Bulut Gemini Flash-Lite LLM)**: Ses tanımanın yerel GPU'da (`faster-whisper`), yalnızca metin temizleme ve imla düzenleme işleminin bulutta ultra hafif `Gemini 3.5 / 3.7 Flash-Lite` ile yapıldığı hibrit sağlayıcı modu.
-- [ ] **Çoklu API Sağlayıcıları & Akıllı Fallback**: OpenAI Whisper, Groq, Anthropic Claude ve DeepSeek API entegrasyonu.
-- [ ] **Bas-Konuş (Push-to-Talk) Modu**: Tuşa basılı tutulduğu sürece kaydedip bırakınca anında yapıştırma seçeneği.
-- [ ] **Ses Dosyası Transkripsiyonu**: `.mp3`, `.wav`, `.m4a` ses kayıtlarını doğrudan sürükle-bırak ile metne dökme.
+- [x] **%100 Çevrimdışı / Yerel Mod**: `faster-whisper (large-v3-turbo)` + `Google Gemma 3 4B Instruct` (llama-cpp CUDA).
+- [x] **Çoklu Platform (Linux / CachyOS Desteği)**: Wayland & PipeWire uyumu, IPC socket tetikleyicisi (`--toggle`), XDG standartları.
+- [x] **ReSpeaker XMOS XVF3800 Donanım Uyarlaması**: 48 kHz polifaz resampling ve uzak alan desteği.
+- [ ] **🧠 Dinamik Kullanıcı Hafızası & Kişiselleştirme (Stephen Hawking / ACAT Modeli)**: Kullanıcı dikte ettikçe en çok kullandığı teknik terimleri yerel olarak öğrenen akıllı hafıza.
+- [ ] **Hibrit Mod (Yerel Whisper STT + Bulut Gemini Flash-Lite LLM)**: Ses tanımanın yerel GPU'da, metin temizlemenin bulutta yapıldığı hibrit mod.
+- [ ] **Ses Dosyası Transkripsiyonu**: `.mp3`, `.wav`, `.m4a` dosyalarını sürükle-bırak ile metne dökme.
 
 ---
 

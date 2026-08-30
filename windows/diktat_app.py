@@ -1,17 +1,29 @@
 import sys
 import os
 import time
+import shutil
 import threading
 import math
-import ctypes
-import winsound
 from pathlib import Path
 import numpy as np
 import sounddevice as sd
 import pyperclip
 from pynput import keyboard as pynput_keyboard
 
+try:
+    import winsound
+except ImportError:
+    winsound = None
+
+if sys.platform == "win32":
+    import ctypes
+    user32 = getattr(ctypes, "windll", None)
+    user32 = user32.user32 if user32 else None
+else:
+    user32 = None
+
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal, QObject, QPoint
+from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QSystemTrayIcon, QMenu, QDialog, QLineEdit, QComboBox,
@@ -23,22 +35,82 @@ from .config import ConfigManager, is_autostart_enabled, set_autostart
 from .api_client import AIClient
 
 # ---------------------------------------------------------
-# Windows API for Direct Paste (Ctrl+V)
+# Cross-Platform Beep & Paste Handlers
 # ---------------------------------------------------------
-user32 = ctypes.windll.user32
-VK_CONTROL = 0x11
-VK_V = 0x56
-KEYEVENTF_KEYUP = 0x0002
+def play_beep(freq: int = 1000, duration_ms: int = 80):
+    """Plays an audio cue. Uses native winsound on Windows or sounddevice sine on Linux/macOS."""
+    if sys.platform == "win32" and winsound:
+        try:
+            winsound.Beep(int(freq), int(duration_ms))
+            return
+        except Exception:
+            pass
+    # Universal fallback for Linux / CachyOS / macOS via sounddevice
+    try:
+        sr = 16000
+        total_samples = int(sr * duration_ms / 1000.0)
+        t = np.linspace(0, duration_ms / 1000.0, total_samples, False)
+        envelope = np.sin(np.linspace(0, np.pi, total_samples))
+        sine_wave = (np.sin(2 * np.pi * freq * t) * envelope * 0.12).astype(np.float32)
+        sd.play(sine_wave, samplerate=sr, blocking=False)
+    except Exception:
+        pass
 
-def windows_paste():
-    """Direct Windows user32.keybd_event Ctrl+V injection."""
-    user32.keybd_event(VK_CONTROL, 0, 0, 0)
-    time.sleep(0.02)
-    user32.keybd_event(VK_V, 0, 0, 0)
-    time.sleep(0.02)
-    user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
-    time.sleep(0.02)
-    user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+def platform_paste():
+    """Cross-platform keyboard injection to paste clipboard content into the active window."""
+    if sys.platform == "win32" and user32:
+        VK_CONTROL = 0x11
+        VK_V = 0x56
+        KEYEVENTF_KEYUP = 0x0002
+        user32.keybd_event(VK_CONTROL, 0, 0, 0)
+        time.sleep(0.02)
+        user32.keybd_event(VK_V, 0, 0, 0)
+        time.sleep(0.02)
+        user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
+        time.sleep(0.02)
+        user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
+        return
+
+    if sys.platform.startswith("linux"):
+        import subprocess
+        # 1. Native Wayland via wtype (CachyOS / Hyprland / KDE Wayland)
+        if shutil.which("wtype"):
+            try:
+                subprocess.run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], timeout=1.0)
+                return
+            except Exception:
+                pass
+        # 2. X11 / XWayland via xdotool
+        if shutil.which("xdotool"):
+            try:
+                subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], timeout=1.0)
+                return
+            except Exception:
+                pass
+        # 3. ydotool fallback
+        if shutil.which("ydotool"):
+            try:
+                subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"], timeout=1.0)
+                return
+            except Exception:
+                pass
+        # 4. pynput fallback
+        try:
+            kb = pynput_keyboard.Controller()
+            with kb.pressed(pynput_keyboard.Key.ctrl):
+                kb.tap('v')
+            return
+        except Exception as e:
+            print(f"Paste fallback error: {e}")
+            return
+
+    if sys.platform == "darwin":
+        try:
+            kb = pynput_keyboard.Controller()
+            with kb.pressed(pynput_keyboard.Key.cmd):
+                kb.tap('v')
+        except Exception:
+            pass
 
 # ---------------------------------------------------------
 # Signals Bridge (Thread-Safe Qt Signals)
@@ -773,6 +845,10 @@ class DiktatApplication:
         self.sec_timer = QTimer()
         self.sec_timer.timeout.connect(self.on_second_tick)
 
+        # Setup Single-Instance IPC Server (Universal for Windows Named Pipes & Linux Unix Sockets)
+        self.ipc_server = None
+        self._setup_ipc_server()
+
         prov = self.config_mgr.get("provider", "local")
         engine_label = "Yerel GPU (RTX 4060 Ti)" if prov == "local" else "Bulut AI"
         self.tray.showMessage(
@@ -781,6 +857,34 @@ class DiktatApplication:
             QSystemTrayIcon.MessageIcon.Information,
             3000
         )
+
+    def _setup_ipc_server(self):
+        socket_name = "diktat_ipc_socket"
+        self.ipc_server = QLocalServer()
+        QLocalServer.removeServer(socket_name)
+        if self.ipc_server.listen(socket_name):
+            self.ipc_server.newConnection.connect(self._on_ipc_connection)
+        else:
+            print(f"[Diktat] IPC Server başlatılamadı: {self.ipc_server.errorString()}")
+
+    def _on_ipc_connection(self):
+        client_socket = self.ipc_server.nextPendingConnection()
+        if client_socket:
+            client_socket.readyRead.connect(lambda: self._handle_ipc_message(client_socket))
+
+    def _handle_ipc_message(self, client_socket):
+        try:
+            raw_msg = client_socket.readAll().data().decode("utf-8", "ignore").strip()
+            if raw_msg == "toggle":
+                self.signals.toggle_requested.emit()
+            elif raw_msg == "cancel":
+                self.signals.cancel_requested.emit()
+            elif raw_msg in ("settings", "show"):
+                self.open_settings()
+        except Exception as e:
+            print(f"IPC Message error: {e}")
+        finally:
+            client_socket.disconnectFromServer()
 
     def setup_signals(self):
         self.signals.toggle_requested.connect(self.toggle_recording)
@@ -880,7 +984,7 @@ class DiktatApplication:
             self.signals.status_changed.emit("recording", "Dinliyor...")
 
             if self.config_mgr.get("play_sound", True):
-                threading.Thread(target=lambda: winsound.Beep(950, 80), daemon=True).start()
+                threading.Thread(target=lambda: play_beep(950, 80), daemon=True).start()
         except Exception as e:
             print(f"Record start error: {e}")
             self.signals.error_occurred.emit(f"Mikrofon hatası: {e}")
@@ -893,7 +997,7 @@ class DiktatApplication:
         self.is_processing = True
 
         if self.config_mgr.get("play_sound", True):
-            threading.Thread(target=lambda: winsound.Beep(1200, 80), daemon=True).start()
+            threading.Thread(target=lambda: play_beep(1200, 80), daemon=True).start()
 
         self.signals.status_changed.emit("transcribing", "Yazıya çevriliyor...")
         threading.Thread(target=self._process_pipeline_thread, daemon=True).start()
@@ -951,9 +1055,9 @@ class DiktatApplication:
         if self.config_mgr.get("auto_paste", True):
             time.sleep(0.06)
             try:
-                windows_paste()
+                platform_paste()
             except Exception as e:
-                print(f"Windows paste error: {e}")
+                print(f"Platform paste error: {e}")
 
         self.signals.status_changed.emit("done", "Yapıştırıldı")
 
@@ -970,6 +1074,11 @@ class DiktatApplication:
         self.cancel_recording()
         if hasattr(self, 'key_listener') and self.key_listener:
             self.key_listener.stop()
+        if hasattr(self, 'ipc_server') and self.ipc_server:
+            try:
+                self.ipc_server.close()
+            except Exception:
+                pass
         self.tray.hide()
         self.app.quit()
 
