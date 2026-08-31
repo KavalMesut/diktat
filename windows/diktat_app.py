@@ -6,6 +6,7 @@ import threading
 import math
 import subprocess
 from pathlib import Path
+import queue
 import numpy as np
 import sounddevice as sd
 import pyperclip
@@ -123,6 +124,7 @@ class AppSignals(QObject):
     level_updated = pyqtSignal(float)
     error_occurred = pyqtSignal(str)
     text_processed = pyqtSignal(str, str)
+    sentence_streamed = pyqtSignal(str)
 
 
 def enable_kwin_hud_positioning():
@@ -214,32 +216,23 @@ class FloatingHUD(QWidget):
 
         self.move(x, y)
 
-    def update_animation(self):
-        if self.isVisible():
-            self.pulse_phase += 0.15
-            self.update()
-
     def set_state(self, state: str, text: str = ""):
         self.state = state
         self.status_text = text
-        if state == "recording":
-            self.elapsed_seconds = 0
+        if state in ("recording", "streaming"):
             self.show()
-        elif state in ["transcribing", "cleaning"]:
+        elif state in ("transcribing", "cleaning", "done", "error"):
             self.show()
-        elif state == "done":
-            self.show()
-            QTimer.singleShot(1500, self.hide_if_done)
-        elif state == "error":
-            self.show()
-            QTimer.singleShot(3500, self.hide_if_done)
+            if state in ("done", "error"):
+                QTimer.singleShot(1800, self._auto_hide_if_done)
         elif state == "idle":
             self.hide()
         self.update()
 
-    def hide_if_done(self):
-        if self.state in ["done", "error", "idle"]:
+    def _auto_hide_if_done(self):
+        if self.state in ("done", "error", "idle"):
             self.hide()
+            self.state = "idle"
 
     def set_timer(self, seconds: int):
         self.elapsed_seconds = seconds
@@ -249,13 +242,24 @@ class FloatingHUD(QWidget):
         self.db_level = db
         self.update()
 
+    def update_animation(self):
+        if self.state in ("recording", "streaming", "transcribing", "cleaning"):
+            self.pulse_phase += 0.22
+            if self.pulse_phase > 2 * math.pi:
+                self.pulse_phase -= 2 * math.pi
+            self.update()
+
     def paintEvent(self, event):
+        if self.state == "idle":
+            return
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
+        # Background Pill (#080d17 dark obsidian with 92% opacity)
         bg_rect = self.rect().adjusted(2, 2, -2, -2)
-        # Deep dark background with subtle warm undertone
-        painter.setBrush(QBrush(QColor(12, 18, 30, 245)))
+        painter.setBrush(QBrush(QColor(8, 13, 23, 238)))
+
         # Subtle #00B7CD / #25334d border
         painter.setPen(QPen(QColor(0, 183, 205, 140), 1.5))
         painter.drawRoundedRect(bg_rect, 25, 25)
@@ -288,6 +292,30 @@ class FloatingHUD(QWidget):
             painter.setPen(QPen(QColor(255, 145, 0)))
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
             painter.drawText(102, dot_y + 4, f"• {db_display}")
+
+        elif self.state == "streaming":
+            # #00B7CD Glowing cyan recording dot for live streaming
+            glow_radius = 7 + pulse * 5
+            painter.setBrush(QBrush(QColor(0, 183, 205, int(70 + pulse * 130))))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPoint(dot_x, dot_y), int(glow_radius), int(glow_radius))
+
+            painter.setBrush(QBrush(QColor(0, 183, 205)))
+            painter.drawEllipse(QPoint(dot_x, dot_y), 4, 4)
+
+            m = self.elapsed_seconds // 60
+            s = self.elapsed_seconds % 60
+            time_str = f"{m:02d}:{s:02d}"
+
+            painter.setPen(QPen(QColor(255, 241, 209)))
+            painter.setFont(QFont("Consolas", 11, QFont.Weight.Bold))
+            painter.drawText(46, dot_y + 4, time_str)
+
+            db_display = f"{self.db_level:.0f} dB" if self.db_level > -85 else "Canlı..."
+            painter.setPen(QPen(QColor(0, 183, 205)))
+            painter.setFont(QFont("Segoe UI", 9, QFont.Weight.DemiBold))
+            badge = self.status_text if self.status_text else f"• {db_display}"
+            painter.drawText(102, dot_y + 4, badge[:20])
 
         elif self.state == "transcribing":
             # #00B7CD Cyan indicator
@@ -331,54 +359,105 @@ class FloatingHUD(QWidget):
             painter.drawText(46, dot_y + 4, disp)
 
 # ---------------------------------------------------------
+# Audio Device Discovery & Input Helpers
+# ---------------------------------------------------------
+def get_clean_input_devices() -> list[dict]:
+    """Returns a deduplicated, clean list of audio input devices across Windows & Linux."""
+    try:
+        devices = sd.query_devices()
+    except Exception:
+        return []
+
+    results = []
+    seen = set()
+
+    for i, d in enumerate(devices):
+        if d.get('max_input_channels', 0) <= 0:
+            continue
+        raw_name = d.get('name', '').strip()
+        if not raw_name:
+            continue
+
+        # Filter internal system virtual aliases
+        if raw_name in ('Microsoft Ses Eşleştiricisi - Input', 'Birincil Ses Yakalama Sürücüsü', 'Input ()'):
+            continue
+        if '@System32' in raw_name or 'bthhfenum.sys' in raw_name:
+            continue
+
+        clean_key = raw_name.lower().replace(' ', '')
+        if clean_key not in seen:
+            seen.add(clean_key)
+            results.append({
+                'index': i,
+                'name': raw_name
+            })
+    return results
+
+def resolve_input_device_index(target_name: str) -> int | None:
+    """Finds the device index for the given device name string, or None for system default."""
+    if not target_name or target_name.lower() in ("default", "varsayılan", ""):
+        return None
+    try:
+        devices = sd.query_devices()
+        # 1. Exact match
+        for i, d in enumerate(devices):
+            if d.get('max_input_channels', 0) > 0 and d.get('name', '').strip() == target_name:
+                return i
+        # 2. Case-insensitive substring match
+        target_lower = target_name.lower()
+        for i, d in enumerate(devices):
+            if d.get('max_input_channels', 0) > 0 and target_lower in d.get('name', '').lower():
+                return i
+    except Exception:
+        pass
+    return None
+
+# ---------------------------------------------------------
 # Audio Recording Engine
 # ---------------------------------------------------------
 class AudioRecorder:
-    def __init__(self, sample_rate=16000, device="auto"):
+    def __init__(self, sample_rate=16000, device_name: str = "", on_sentence_callback=None):
         self.sample_rate = sample_rate
-        self.device = device
+        self.device_name = device_name
+        self.on_sentence_callback = on_sentence_callback
         self.is_recording = False
         self.audio_chunks = []
         self.stream = None
         self.actual_samplerate = sample_rate
 
-    def _select_input_device(self):
-        """Return a stable microphone device when one is explicitly configured."""
-        requested = str(self.device or "auto").strip()
-        if requested.lower() in ("", "auto", "default"):
-            return None
+        # Streaming sentence segmentation state
+        self.streaming_mode = False
+        self.current_sentence_chunks = []
+        self.speech_frames_count = 0
+        self.silence_frames_count = 0
+        self.is_speaking = False
+        self._lock = threading.Lock()
 
+    def start(self, streaming: bool = False):
+        with self._lock:
+            self.audio_chunks = []
+            self.current_sentence_chunks = []
+            self.speech_frames_count = 0
+            self.silence_frames_count = 0
+            self.is_speaking = False
+            self.is_recording = True
+            self.streaming_mode = streaming
+            self.actual_samplerate = self.sample_rate
+
+        dev_idx = resolve_input_device_index(self.device_name)
+
+        # Check input device availability
         try:
-            for index, info in enumerate(sd.query_devices()):
-                if info.get("max_input_channels", 0) <= 0:
-                    continue
-                if info.get("name", "").lower() == requested.lower():
-                    return index
-        except Exception:
-            pass
-
-        # A missing saved device should not prevent recording through the system default.
-        print(f"Configured microphone not found, using system default: {requested}")
-        return None
-
-    def start(self):
-        self.audio_chunks = []
-        self.is_recording = True
-        self.actual_samplerate = self.sample_rate
-        
-        # Check default input device availability
-        try:
-            default_dev = sd.default.device
-            if default_dev[0] == -1 or default_dev[0] is None:
-                devices = sd.query_devices()
-                valid_in = [i for i, d in enumerate(devices) if d.get('max_input_channels', 0) > 0 and d.get('hostapi', 0) in (0, 1, 2)]
-                if not valid_in:
-                    raise RuntimeError("Windows'ta aktif mikrofon bulunamadı! Lütfen mikrofonunuzu bağlayın veya Ses Ayarlarından etkinleştirin.")
+            if dev_idx is None:
+                default_dev = sd.default.device
+                if default_dev[0] == -1 or default_dev[0] is None:
+                    devices = sd.query_devices()
+                    valid_in = [i for i, d in enumerate(devices) if d.get('max_input_channels', 0) > 0 and d.get('hostapi', 0) in (0, 1, 2)]
+                    if not valid_in:
+                        raise RuntimeError("Aktif mikrofon bulunamadı! Lütfen mikrofonunuzu bağlayın veya Ses Ayarlarından etkinleştirin.")
         except Exception as check_err:
-            if "aktif mikrofon bulunamadı" in str(check_err):
+            if "Aktif mikrofon bulunamadı" in str(check_err):
                 raise check_err
-
-        input_device = self._select_input_device()
 
         # Universal fallback for sample rate and channel layout (e.g. XMOS XVF3800, ReSpeaker, etc.)
         stream_opened = False
@@ -387,7 +466,7 @@ class AudioRecorder:
                 try:
                     cb = self._audio_callback if ch == 1 else self._audio_callback_stereo
                     self.stream = sd.InputStream(
-                        device=input_device,
+                        device=dev_idx,
                         samplerate=sr,
                         channels=ch,
                         dtype='float32',
@@ -411,14 +490,91 @@ class AudioRecorder:
         if not stream_opened:
             raise RuntimeError("Mikrofon başlatılamadı. Ses Ayarları ve mikrofon izinlerini kontrol edin.")
 
+    def _convert_chunks_to_16k(self, chunks: list) -> np.ndarray:
+        if not chunks:
+            return np.array([], dtype='float32')
+        audio = np.concatenate(chunks, axis=0).flatten()
+        if self.actual_samplerate != self.sample_rate and len(audio) > 0:
+            try:
+                import scipy.signal
+                import math
+                gcd = math.gcd(self.sample_rate, self.actual_samplerate)
+                up = self.sample_rate // gcd
+                down = self.actual_samplerate // gcd
+                audio = scipy.signal.resample_poly(audio, up, down).astype(np.float32)
+            except Exception as e:
+                print(f"Resample warning: {e}")
+        # Far-field USB arrays can deliver a very conservative capture level.
+        # Normalize quiet speech before Whisper, while preserving headroom.
+        rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) else 0.0
+        peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
+        print(
+            f"[Diktat] Captured {len(audio)} samples; rms={rms:.6f}, peak={peak:.6f}",
+            flush=True,
+        )
+        if rms > 1e-5 and rms < 0.04:
+            gain = min(40.0, 0.08 / rms)
+            audio = np.clip(audio * gain, -0.98, 0.98).astype(np.float32)
+            print(
+                f"[Diktat] Quiet microphone signal normalized: {rms:.5f} -> gain {gain:.1f}x",
+                flush=True,
+            )
+        return audio
+
+    def _process_chunk_for_streaming(self, mono_chunk: np.ndarray):
+        if not self.streaming_mode or not self.on_sentence_callback:
+            return
+
+        rms = np.sqrt(np.mean(mono_chunk ** 2))
+        db = 20 * np.log10(rms) if rms > 0 else -90.0
+
+        # Speech activity threshold
+        is_speech = (db >= -44.0)
+
+        with self._lock:
+            self.current_sentence_chunks.append(mono_chunk)
+
+            if is_speech:
+                self.is_speaking = True
+                self.speech_frames_count += 1
+                self.silence_frames_count = 0
+            else:
+                if self.is_speaking:
+                    self.silence_frames_count += 1
+                    # Sentence boundary criteria:
+                    # User spoke at least ~0.7s (approx 11 frames @ 1024 samples)
+                    # And paused/took breath for ~0.55s (approx 9 frames)
+                    fps = max(1.0, float(self.actual_samplerate) / 1024.0)
+                    min_speech_frames = int(0.7 * fps)
+                    pause_silence_frames = int(0.55 * fps)
+
+                    if self.speech_frames_count >= min_speech_frames and self.silence_frames_count >= pause_silence_frames:
+                        sentence_chunks = list(self.current_sentence_chunks)
+                        self.current_sentence_chunks = []
+                        self.speech_frames_count = 0
+                        self.silence_frames_count = 0
+                        self.is_speaking = False
+
+                        sentence_audio = self._convert_chunks_to_16k(sentence_chunks)
+                        if len(sentence_audio) >= 8000:  # >= 0.5s of audio
+                            try:
+                                self.on_sentence_callback(sentence_audio, False)
+                            except Exception as e:
+                                print(f"Sentence callback error: {e}")
+
     def _audio_callback(self, indata, frames, time_info, status):
         if self.is_recording:
-            self.audio_chunks.append(indata.copy())
+            chunk = indata.copy()
+            self.audio_chunks.append(chunk)
+            if self.streaming_mode:
+                self._process_chunk_for_streaming(chunk)
 
     def _audio_callback_stereo(self, indata, frames, time_info, status):
         if self.is_recording:
             mono = np.mean(indata, axis=1, keepdims=True)
             self.audio_chunks.append(mono)
+            if self.streaming_mode:
+                self._process_chunk_for_streaming(mono)
 
     def get_current_db(self) -> float:
         if not self.audio_chunks:
@@ -439,36 +595,22 @@ class AudioRecorder:
             except Exception:
                 pass
             self.stream = None
-        if self.audio_chunks:
-            audio = np.concatenate(self.audio_chunks, axis=0).flatten()
-            # If hardware recorded at a native rate (e.g. 48000 Hz on XVF3800), cleanly resample to 16000 Hz for Whisper
-            if self.actual_samplerate != self.sample_rate and len(audio) > 0:
-                try:
-                    import scipy.signal
-                    import math
-                    gcd = math.gcd(self.sample_rate, self.actual_samplerate)
-                    up = self.sample_rate // gcd
-                    down = self.actual_samplerate // gcd
-                    audio = scipy.signal.resample_poly(audio, up, down).astype(np.float32)
-                except Exception as e:
-                    print(f"Resample warning: {e}")
-            # Far-field USB arrays can deliver a very conservative capture level.
-            # Normalize quiet speech before Whisper/VAD, while preserving headroom.
-            rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) else 0.0
-            peak = float(np.max(np.abs(audio))) if len(audio) else 0.0
-            print(
-                f"[Diktat] Captured {len(audio)} samples; rms={rms:.6f}, peak={peak:.6f}",
-                flush=True,
-            )
-            if rms > 1e-5 and rms < 0.04:
-                gain = min(40.0, 0.08 / rms)
-                audio = np.clip(audio * gain, -0.98, 0.98).astype(np.float32)
-                print(
-                    f"[Diktat] Quiet microphone signal normalized: {rms:.5f} -> gain {gain:.1f}x",
-                    flush=True,
-                )
-            return audio
-        return np.array([], dtype='float32')
+
+        with self._lock:
+            # Emit final pending sentence chunk in streaming mode if it has speech
+            if self.streaming_mode and self.current_sentence_chunks and self.speech_frames_count > 0:
+                final_chunks = list(self.current_sentence_chunks)
+                self.current_sentence_chunks = []
+                final_audio = self._convert_chunks_to_16k(final_chunks)
+                if len(final_audio) >= 6000 and self.on_sentence_callback:
+                    try:
+                        self.on_sentence_callback(final_audio, True)
+                    except Exception as e:
+                        print(f"Final sentence callback error: {e}")
+
+            all_chunks = list(self.audio_chunks)
+            self.audio_chunks = []
+            return self._convert_chunks_to_16k(all_chunks)
 
 # ---------------------------------------------------------
 # Global Keyboard Listener (Pynput Hook)
@@ -490,7 +632,7 @@ class GlobalKeyListener:
             now = time.time()
             if now - self.last_trigger_time < 0.35:
                 return  # Debounce duplicate key events
-            
+
             if self.ctrl_pressed and self.alt_pressed:
                 self.last_trigger_time = now
                 self.signals.cancel_requested.emit()
@@ -539,7 +681,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config_mgr = config_mgr
         self.setWindowTitle("Diktat - Ayarlar")
-        self.setFixedSize(600, 740)
+        self.setMinimumSize(600, 780)
+        self.resize(620, 830)
 
         check_path = get_ui_asset_path("icon_check.png")
         chevron_path = get_ui_asset_path("icon_chevron.png")
@@ -643,7 +786,7 @@ class SettingsDialog(QDialog):
         api_layout.addWidget(QLabel("Model Sağlayıcı:"))
         self.combo_provider = QComboBox()
         self.combo_provider.addItems([
-            "⚡ Yerel AI (RTX 4060 Ti: Faster-Whisper + Qwen) - Çevrimdışı",
+            "⚡ Yerel AI (RTX 4060 Ti: Faster-Whisper + Google Gemma 3 4B) - Çevrimdışı",
             "✨ Google Gemini 3.7 Flash (Bulut)",
             "🌐 OpenAI Whisper + GPT-4o-mini (Bulut)"
         ])
@@ -656,24 +799,14 @@ class SettingsDialog(QDialog):
             self.combo_provider.setCurrentIndex(2)
         api_layout.addWidget(self.combo_provider)
 
-        # Local LLM Model Selector for A/B Testing
+        # Local LLM Model Selector
         self.lbl_local_model = QLabel("Yerel Düzeltme Modeli:")
         api_layout.addWidget(self.lbl_local_model)
         self.combo_local_model = QComboBox()
         self.combo_local_model.addItems([
-            "⚡ Google Gemma 3 4B Instruct (4-bit Q4_K_M) - Disiplinli & Doğru (Önerilen)",
-            "⚡ Qwen 2.5 3B Instruct (4-bit Q4_K_M) - Hafif & Hızlı",
-            "🚀 Qwen3 4B Instruct 2507 (4-bit Q4_K_M) - Yüksek Kapasite"
+            "⚡ Google Gemma 3 4B Instruct (4-bit Q4_K_M) - Disiplinli & Doğru"
         ])
-        current_model = self.config_mgr.get("local_llm_model", "gemma-3-4b")
-        if current_model == "gemma-3-4b":
-            self.combo_local_model.setCurrentIndex(0)
-        elif current_model == "qwen2.5-3b":
-            self.combo_local_model.setCurrentIndex(1)
-        elif current_model == "qwen3-4b":
-            self.combo_local_model.setCurrentIndex(2)
-        else:
-            self.combo_local_model.setCurrentIndex(0)
+        self.combo_local_model.setCurrentIndex(0)
         api_layout.addWidget(self.combo_local_model)
 
         self.lbl_gemini = QLabel("Gemini API Anahtarı (Bulut Modu İçin):")
@@ -683,7 +816,7 @@ class SettingsDialog(QDialog):
         self.txt_gemini.setPlaceholderText("Yerel AI modunda anahtar gerekmez...")
         api_layout.addWidget(self.txt_gemini)
 
-        self.lbl_local_status = QLabel("⚡ RTX 4060 Ti GPU (CUDA) devrede: %100 Çevrimdışı ve Limitsiz.")
+        self.lbl_local_status = QLabel("⚡ RTX 4060 Ti GPU (CUDA) devrede: Faster-Whisper + Google Gemma 3 4B (%100 Çevrimdışı)")
         self.lbl_local_status.setStyleSheet("color: #00B7CD; font-size: 11px; font-weight: 500;")
         api_layout.addWidget(self.lbl_local_status)
 
@@ -696,7 +829,7 @@ class SettingsDialog(QDialog):
         gen_group = QGroupBox("Diktat Tercihleri")
         gen_layout = QVBoxLayout(gen_group)
         gen_layout.setContentsMargins(16, 22, 16, 16)
-        gen_layout.setSpacing(12)
+        gen_layout.setSpacing(10)
 
         # Shortcut row
         hk_row = QHBoxLayout()
@@ -716,14 +849,36 @@ class SettingsDialog(QDialog):
         hk_row.addStretch()
         gen_layout.addLayout(hk_row)
 
-        # Two-column layout for Language and Overlay Corner with plenty of room
-        select_row = QHBoxLayout()
-        select_row.setSpacing(16)
+        # Dictation Mode selector (One-Shot vs Streaming)
+        gen_layout.addWidget(QLabel("Dikte Modu (Ses İşleme Mantığı):"))
+        self.combo_mode = QComboBox()
+        self.combo_mode.addItem("🎯 Tek Seferde (One-Shot) - Konuşma bitince tüm metni yapıştır (Varsayılan)", "batch")
+        self.combo_mode.addItem("⚡ Cümle Bazlı Canlı Dikte (Streaming) - Konuşurken eşzamanlı yapıştır", "streaming")
+        cur_mode = self.config_mgr.get("dictation_mode", "batch")
+        self.combo_mode.setCurrentIndex(1 if cur_mode == "streaming" else 0)
+        gen_layout.addWidget(self.combo_mode)
 
-        # Left Column: Language
-        col_lang = QVBoxLayout()
-        col_lang.setSpacing(6)
-        col_lang.addWidget(QLabel("Konuşma Dili:"))
+        # Microphone input device selector
+        gen_layout.addWidget(QLabel("Giriş Mikrofonu (Ses Kayıt Cihazı):"))
+        self.combo_mic = QComboBox()
+        self.combo_mic.addItem("🎙️ Varsayılan Sistem Mikrofonu (Otomatik)", "")
+
+        self.available_mics = get_clean_input_devices()
+        current_mic = self.config_mgr.get("input_device", "")
+        selected_mic_idx = 0
+
+        for idx, mic in enumerate(self.available_mics, start=1):
+            self.combo_mic.addItem(f"🎤 {mic['name']}", mic['name'])
+            if current_mic and current_mic == mic['name']:
+                selected_mic_idx = idx
+            elif current_mic and current_mic.lower() in mic['name'].lower() and selected_mic_idx == 0:
+                selected_mic_idx = idx
+
+        self.combo_mic.setCurrentIndex(selected_mic_idx)
+        gen_layout.addWidget(self.combo_mic)
+
+        # Language Selector
+        gen_layout.addWidget(QLabel("Konuşma Dili:"))
         self.combo_lang = QComboBox()
         self.combo_lang.addItems(["Türkçe (tr)", "English (en)", "Otomatik (auto)"])
         l = self.config_mgr.get("language", "tr")
@@ -733,13 +888,10 @@ class SettingsDialog(QDialog):
             self.combo_lang.setCurrentIndex(2)
         else:
             self.combo_lang.setCurrentIndex(0)
-        col_lang.addWidget(self.combo_lang)
-        select_row.addLayout(col_lang)
+        gen_layout.addWidget(self.combo_lang)
 
-        # Right Column: Indicator Position
-        col_corner = QVBoxLayout()
-        col_corner.setSpacing(6)
-        col_corner.addWidget(QLabel("Gösterge Konumu:"))
+        # Overlay Indicator Position Selector
+        gen_layout.addWidget(QLabel("Gösterge Konumu:"))
         self.combo_corner = QComboBox()
         self.combo_corner.addItems([
             "Sağ Alt Köşe (Önerilen)",
@@ -751,13 +903,10 @@ class SettingsDialog(QDialog):
         corners = ["bottom-right", "bottom-left", "top-right", "top-left"]
         if c in corners:
             self.combo_corner.setCurrentIndex(corners.index(c))
-        col_corner.addWidget(self.combo_corner)
-        select_row.addLayout(col_corner)
-
-        gen_layout.addLayout(select_row)
+        gen_layout.addWidget(self.combo_corner)
 
         # Distinct spacing between comboboxes and checkboxes
-        gen_layout.addSpacing(16)
+        gen_layout.addSpacing(10)
 
         # Checkboxes
         self.chk_autostart = QCheckBox("Windows başlangıcında otomatik başlat (Arka planda)")
@@ -792,7 +941,7 @@ class SettingsDialog(QDialog):
         # Buttons
         btn_layout = QHBoxLayout()
         btn_layout.setContentsMargins(0, 4, 0, 0)
-        
+
         btn_cancel = QPushButton("İptal")
         btn_cancel.setStyleSheet("""
             QPushButton {
@@ -840,24 +989,20 @@ class SettingsDialog(QDialog):
         providers = ["local", "gemini", "openai"]
         chosen_provider = providers[self.combo_provider.currentIndex()]
         self.config_mgr.set("provider", chosen_provider)
-        
+
         langs = ["tr", "en", "auto"]
         self.config_mgr.set("language", langs[self.combo_lang.currentIndex()])
 
-        # Save selected Local LLM Model (A/B Test)
-        model_keys = ["gemma-3-4b", "qwen2.5-3b", "qwen3-4b"]
-        idx = max(0, min(len(model_keys) - 1, self.combo_local_model.currentIndex()))
-        chosen_local_model = model_keys[idx]
-        old_local_model = self.config_mgr.get("local_llm_model", "gemma-3-4b")
-        self.config_mgr.set("local_llm_model", chosen_local_model)
-        
-        # If local model changed, reload in background
-        if chosen_local_model != old_local_model and chosen_provider == "local":
-            try:
-                from .local_engine import LocalAIEngine
-                threading.Thread(target=lambda: LocalAIEngine.get_instance().reload_llm(chosen_local_model), daemon=True).start()
-            except Exception as e:
-                print(f"Error reloading local LLM: {e}")
+        # Save selected Local LLM Model
+        self.config_mgr.set("local_llm_model", "gemma-3-4b")
+
+        # Save Dictation Mode (One-Shot vs Streaming)
+        chosen_mode = self.combo_mode.currentData() or "batch"
+        self.config_mgr.set("dictation_mode", chosen_mode)
+
+        # Save selected Input Microphone Device
+        chosen_mic = self.combo_mic.currentData() or ""
+        self.config_mgr.set("input_device", chosen_mic)
 
         corners = ["bottom-right", "bottom-left", "top-right", "top-left"]
         self.config_mgr.set("overlay_corner", corners[self.combo_corner.currentIndex()])
@@ -896,9 +1041,15 @@ class DiktatApplication:
         self.signals = AppSignals()
         self.recorder = AudioRecorder(
             sample_rate=self.config_mgr.get("sample_rate", 16000),
-            device=self.config_mgr.get("input_device", "auto"),
+            device_name=self.config_mgr.get("input_device", ""),
+            on_sentence_callback=self._on_sentence_recorded_chunk
         )
         self.ai_client = AIClient(self.config_mgr.config)
+        self.streaming_queue = queue.Queue()
+
+        # Start background streaming worker consumer thread
+        self.streaming_worker_thread = threading.Thread(target=self._streaming_consumer_loop, daemon=True)
+        self.streaming_worker_thread.start()
 
         # Preload local models in background if provider is local
         if self.config_mgr.get("provider", "local") == "local":
@@ -979,6 +1130,7 @@ class DiktatApplication:
         self.signals.status_changed.connect(self.hud.set_state)
         self.signals.level_updated.connect(self.hud.set_db)
         self.signals.text_processed.connect(self._on_text_ready)
+        self.signals.sentence_streamed.connect(self._on_sentence_streamed)
         self.signals.error_occurred.connect(self._on_error)
 
     def setup_tray(self):
@@ -1054,6 +1206,43 @@ class DiktatApplication:
         self.tray.setContextMenu(menu)
         self.tray.show()
 
+    def _on_sentence_recorded_chunk(self, audio_data: np.ndarray, is_final: bool):
+        """Callback from AudioRecorder when a full sentence/thought segment is detected."""
+        self.streaming_queue.put((audio_data, is_final))
+
+    def _streaming_consumer_loop(self):
+        """Background thread continuously transcribing and cleaning sentence chunks."""
+        while True:
+            try:
+                item = self.streaming_queue.get()
+                if item is None:
+                    break
+                audio_segment, is_final = item
+                if len(audio_segment) >= 4000:
+                    raw, cleaned = self.ai_client.transcribe_and_cleanup(
+                        audio_segment,
+                        sample_rate=self.config_mgr.get("sample_rate", 16000)
+                    )
+                    if cleaned and cleaned.strip():
+                        self.signals.sentence_streamed.emit(cleaned.strip())
+                self.streaming_queue.task_done()
+            except Exception as e:
+                print(f"Streaming consumer error: {e}")
+
+    def _on_sentence_streamed(self, cleaned_sentence: str):
+        """Triggered on Qt UI thread when a sentence has been cleaned and is ready to paste."""
+        text_to_paste = cleaned_sentence + " "
+        pyperclip.copy(text_to_paste)
+
+        if self.config_mgr.get("auto_paste", True):
+            time.sleep(0.04)
+            try:
+                platform_paste()
+            except Exception as e:
+                print(f"Streaming paste error: {e}")
+
+        self.signals.status_changed.emit("streaming", "⚡ Cümle yazıldı")
+
     def toggle_recording(self):
         if self.is_processing:
             return
@@ -1064,11 +1253,18 @@ class DiktatApplication:
 
     def start_recording(self):
         try:
-            self.recorder.start()
+            mode = self.config_mgr.get("dictation_mode", "batch")
+            is_streaming = (mode == "streaming")
+
+            self.recorder.start(streaming=is_streaming)
             self.is_recording = True
             self.elapsed_sec = 0
             self.sec_timer.start(1000)
-            self.signals.status_changed.emit("recording", "Dinliyor...")
+
+            if is_streaming:
+                self.signals.status_changed.emit("streaming", "Canlı Dikte...")
+            else:
+                self.signals.status_changed.emit("recording", "Dinliyor...")
 
             if self.config_mgr.get("play_sound", True):
                 threading.Thread(target=lambda: play_beep(950, 80), daemon=True).start()
@@ -1079,15 +1275,27 @@ class DiktatApplication:
     def stop_and_process(self):
         if not self.is_recording:
             return
+
+        mode = self.config_mgr.get("dictation_mode", "batch")
         self.is_recording = False
         self.sec_timer.stop()
-        self.is_processing = True
 
         if self.config_mgr.get("play_sound", True):
             threading.Thread(target=lambda: play_beep(1200, 80), daemon=True).start()
 
-        self.signals.status_changed.emit("transcribing", "Yazıya çevriliyor...")
-        threading.Thread(target=self._process_pipeline_thread, daemon=True).start()
+        if mode == "streaming":
+            # In streaming mode, stopping the recorder flushes the last sentence to the queue
+            self.recorder.stop()
+            # Wait for any final queued sentence to finish processing
+            def wait_and_finish():
+                time.sleep(0.3)
+                self.streaming_queue.join()
+                self.signals.status_changed.emit("done", "Tamamlandı")
+            threading.Thread(target=wait_and_finish, daemon=True).start()
+        else:
+            self.is_processing = True
+            self.signals.status_changed.emit("transcribing", "Yazıya çevriliyor...")
+            threading.Thread(target=self._process_pipeline_thread, daemon=True).start()
 
     def cancel_recording(self):
         if self.is_recording:
@@ -1155,6 +1363,7 @@ class DiktatApplication:
         dlg = SettingsDialog(self.config_mgr)
         if dlg.exec():
             self.ai_client = AIClient(self.config_mgr.config)
+            self.recorder.device_name = self.config_mgr.get("input_device", "")
             self.hud.reposition()
 
     def quit_app(self):
