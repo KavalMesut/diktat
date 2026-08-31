@@ -7,8 +7,8 @@ echo   Diktat - Standalone EXE Olusturucu (PyInstaller)
 echo ========================================================
 echo.
 
-echo Derleme basliyor...
-python -m PyInstaller --noconfirm Diktat.spec
+echo Derleme basliyor (Gecici dosyalar %%TEMP%% altinda olusturuluyor)...
+python -m PyInstaller --noconfirm --workpath "%TEMP%\diktat_build" Diktat.spec
 
 echo.
 echo Derleme tamamlandi! 
