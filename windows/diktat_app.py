@@ -291,11 +291,66 @@ class FloatingHUD(QWidget):
             painter.drawText(46, dot_y + 4, disp)
 
 # ---------------------------------------------------------
+# Audio Device Discovery & Input Helpers
+# ---------------------------------------------------------
+def get_clean_input_devices() -> list[dict]:
+    """Returns a deduplicated, clean list of audio input devices across Windows & Linux."""
+    try:
+        devices = sd.query_devices()
+    except Exception:
+        return []
+    
+    results = []
+    seen = set()
+    
+    for i, d in enumerate(devices):
+        if d.get('max_input_channels', 0) <= 0:
+            continue
+        raw_name = d.get('name', '').strip()
+        if not raw_name:
+            continue
+            
+        # Filter internal system virtual aliases
+        if raw_name in ('Microsoft Ses Eşleştiricisi - Input', 'Birincil Ses Yakalama Sürücüsü', 'Input ()'):
+            continue
+        if '@System32' in raw_name or 'bthhfenum.sys' in raw_name:
+            continue
+            
+        clean_key = raw_name.lower().replace(' ', '')
+        if clean_key not in seen:
+            seen.add(clean_key)
+            results.append({
+                'index': i,
+                'name': raw_name
+            })
+    return results
+
+def resolve_input_device_index(target_name: str) -> int | None:
+    """Finds the device index for the given device name string, or None for system default."""
+    if not target_name or target_name.lower() in ("default", "varsayılan", ""):
+        return None
+    try:
+        devices = sd.query_devices()
+        # 1. Exact match
+        for i, d in enumerate(devices):
+            if d.get('max_input_channels', 0) > 0 and d.get('name', '').strip() == target_name:
+                return i
+        # 2. Case-insensitive substring match
+        target_lower = target_name.lower()
+        for i, d in enumerate(devices):
+            if d.get('max_input_channels', 0) > 0 and target_lower in d.get('name', '').lower():
+                return i
+    except Exception:
+        pass
+    return None
+
+# ---------------------------------------------------------
 # Audio Recording Engine
 # ---------------------------------------------------------
 class AudioRecorder:
-    def __init__(self, sample_rate=16000):
+    def __init__(self, sample_rate=16000, device_name: str = ""):
         self.sample_rate = sample_rate
+        self.device_name = device_name
         self.is_recording = False
         self.audio_chunks = []
         self.stream = None
@@ -306,16 +361,19 @@ class AudioRecorder:
         self.is_recording = True
         self.actual_samplerate = self.sample_rate
         
-        # Check default input device availability
+        dev_idx = resolve_input_device_index(self.device_name)
+        
+        # Check input device availability
         try:
-            default_dev = sd.default.device
-            if default_dev[0] == -1 or default_dev[0] is None:
-                devices = sd.query_devices()
-                valid_in = [i for i, d in enumerate(devices) if d.get('max_input_channels', 0) > 0 and d.get('hostapi', 0) in (0, 1, 2)]
-                if not valid_in:
-                    raise RuntimeError("Windows'ta aktif mikrofon bulunamadı! Lütfen mikrofonunuzu bağlayın veya Ses Ayarlarından etkinleştirin.")
+            if dev_idx is None:
+                default_dev = sd.default.device
+                if default_dev[0] == -1 or default_dev[0] is None:
+                    devices = sd.query_devices()
+                    valid_in = [i for i, d in enumerate(devices) if d.get('max_input_channels', 0) > 0 and d.get('hostapi', 0) in (0, 1, 2)]
+                    if not valid_in:
+                        raise RuntimeError("Aktif mikrofon bulunamadı! Lütfen mikrofonunuzu bağlayın veya Ses Ayarlarından etkinleştirin.")
         except Exception as check_err:
-            if "aktif mikrofon bulunamadı" in str(check_err):
+            if "Aktif mikrofon bulunamadı" in str(check_err):
                 raise check_err
 
         # Universal fallback for sample rate and channel layout (e.g. XMOS XVF3800, ReSpeaker, etc.)
@@ -325,6 +383,7 @@ class AudioRecorder:
                 try:
                     cb = self._audio_callback if ch == 1 else self._audio_callback_stereo
                     self.stream = sd.InputStream(
+                        device=dev_idx,
                         samplerate=sr,
                         channels=ch,
                         dtype='float32',
@@ -623,6 +682,25 @@ class SettingsDialog(QDialog):
         hk_row.addStretch()
         gen_layout.addLayout(hk_row)
 
+        # Microphone input device selector
+        gen_layout.addWidget(QLabel("Giriş Mikrofonu (Ses Kayıt Cihazı):"))
+        self.combo_mic = QComboBox()
+        self.combo_mic.addItem("🎙️ Varsayılan Sistem Mikrofonu (Otomatik)", "")
+        
+        self.available_mics = get_clean_input_devices()
+        current_mic = self.config_mgr.get("input_device", "")
+        selected_mic_idx = 0
+        
+        for idx, mic in enumerate(self.available_mics, start=1):
+            self.combo_mic.addItem(f"🎤 {mic['name']}", mic['name'])
+            if current_mic and current_mic == mic['name']:
+                selected_mic_idx = idx
+            elif current_mic and current_mic.lower() in mic['name'].lower() and selected_mic_idx == 0:
+                selected_mic_idx = idx
+
+        self.combo_mic.setCurrentIndex(selected_mic_idx)
+        gen_layout.addWidget(self.combo_mic)
+
         # Two-column layout for Language and Overlay Corner with plenty of room
         select_row = QHBoxLayout()
         select_row.setSpacing(16)
@@ -754,6 +832,10 @@ class SettingsDialog(QDialog):
         # Save selected Local LLM Model
         self.config_mgr.set("local_llm_model", "gemma-3-4b")
 
+        # Save selected Input Microphone Device
+        chosen_mic = self.combo_mic.currentData() or ""
+        self.config_mgr.set("input_device", chosen_mic)
+
         corners = ["bottom-right", "bottom-left", "top-right", "top-left"]
         self.config_mgr.set("overlay_corner", corners[self.combo_corner.currentIndex()])
 
@@ -789,7 +871,10 @@ class DiktatApplication:
 
         self.config_mgr = ConfigManager()
         self.signals = AppSignals()
-        self.recorder = AudioRecorder(sample_rate=self.config_mgr.get("sample_rate", 16000))
+        self.recorder = AudioRecorder(
+            sample_rate=self.config_mgr.get("sample_rate", 16000),
+            device_name=self.config_mgr.get("input_device", "")
+        )
         self.ai_client = AIClient(self.config_mgr.config)
 
         # Preload local models in background if provider is local
@@ -1046,6 +1131,7 @@ class DiktatApplication:
         dlg = SettingsDialog(self.config_mgr)
         if dlg.exec():
             self.ai_client = AIClient(self.config_mgr.config)
+            self.recorder.device_name = self.config_mgr.get("input_device", "")
             self.hud.reposition()
 
     def quit_app(self):

@@ -187,7 +187,8 @@ DEFAULT_CONFIG = {
     "silence_db": -50.0,
     "sample_rate": 16000,
     "max_duration_seconds": 300,
-    "cleanup_enabled": True
+    "cleanup_enabled": True,
+    "input_device": ""  # Device name or empty for system default
 }
 
 class ConfigManager:
