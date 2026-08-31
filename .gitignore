@@ -13,7 +13,6 @@ env/
 # PyInstaller / Build outputs
 build/
 dist/
-*.spec
 *.exe
 
 # IDE & OS
