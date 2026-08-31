@@ -188,7 +188,8 @@ DEFAULT_CONFIG = {
     "sample_rate": 16000,
     "max_duration_seconds": 300,
     "cleanup_enabled": True,
-    "input_device": ""  # Device name or empty for system default
+    "input_device": "",  # Device name or empty for system default
+    "dictation_mode": "batch"  # "batch" (One-Shot) or "streaming" (Sentence-by-Sentence Live)
 }
 
 class ConfigManager:
