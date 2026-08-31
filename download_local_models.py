@@ -34,36 +34,16 @@ def download_models():
         print("Faster-Whisper (large-v3-turbo) initialized on CPU.")
 
     print("\n==================================================")
-    print("2/4: Downloading Google Gemma 3 4B Instruct 4-bit GGUF (Primary Recommended)...")
+    print("2/2: Downloading Google Gemma 3 4B Instruct 4-bit GGUF...")
     print("==================================================")
     gemma_path = hf_hub_download(
         repo_id="ggml-org/gemma-3-4b-it-GGUF",
         filename="gemma-3-4b-it-Q4_K_M.gguf",
         local_dir=str(models_dir / "llm")
     )
-    print(f"Gemma 3 4B GGUF downloaded to: {gemma_path}")
+    print(f"Google Gemma 3 4B GGUF downloaded to: {gemma_path}")
 
-    print("\n==================================================")
-    print("3/4: Downloading Qwen 2.5 3B Instruct 4-bit GGUF...")
-    print("==================================================")
-    qwen_path = hf_hub_download(
-        repo_id="Qwen/Qwen2.5-3B-Instruct-GGUF",
-        filename="qwen2.5-3b-instruct-q4_k_m.gguf",
-        local_dir=str(models_dir / "llm")
-    )
-    print(f"Qwen 2.5 3B GGUF downloaded to: {qwen_path}")
-
-    print("\n==================================================")
-    print("4/4: Downloading Qwen3 4B Instruct 2507 4-bit GGUF...")
-    print("==================================================")
-    qwen3_path = hf_hub_download(
-        repo_id="unsloth/Qwen3-4B-Instruct-2507-GGUF",
-        filename="Qwen3-4B-Instruct-2507-Q4_K_M.gguf",
-        local_dir=str(models_dir / "llm")
-    )
-    print(f"Qwen3 4B GGUF downloaded to: {qwen3_path}")
-
-    print("\nAll local AI models (Whisper + Gemma 3 4B + Qwen 2.5 3B + Qwen3 4B) downloaded and verified successfully!")
+    print("\nAll local AI models (Faster-Whisper + Google Gemma 3 4B) verified successfully!")
 
 if __name__ == "__main__":
     download_models()

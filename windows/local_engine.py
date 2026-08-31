@@ -51,55 +51,24 @@ class LocalAIEngine:
         return p
 
     def get_llm_path(self, model_key: str = None) -> Path:
-        key = model_key or self.config.get("local_llm_model", "gemma-3-4b")
         llm_dir = self.get_models_dir() / "llm"
-        
-        if key == "gemma-3-4b":
-            pgemma = llm_dir / "gemma-3-4b-it-Q4_K_M.gguf"
-            if pgemma.exists():
-                return pgemma
-        elif key == "qwen3-4b":
-            p4b = llm_dir / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
-            if p4b.exists():
-                return p4b
-        elif key == "qwen2.5-3b":
-            p3b = llm_dir / "qwen2.5-3b-instruct-q4_k_m.gguf"
-            if p3b.exists():
-                return p3b
-        
-        # Fallback priority: Gemma 3 4B -> Qwen 2.5 3B -> Qwen3 4B -> Any GGUF
-        for fname in ["gemma-3-4b-it-Q4_K_M.gguf", "qwen2.5-3b-instruct-q4_k_m.gguf", "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"]:
-            p = llm_dir / fname
-            if p.exists():
-                return p
+        pgemma = llm_dir / "gemma-3-4b-it-Q4_K_M.gguf"
+        if pgemma.exists():
+            return pgemma
         for f in llm_dir.glob("*.gguf"):
             return f
-        return llm_dir / "gemma-3-4b-it-Q4_K_M.gguf"
+        return pgemma
 
     def get_available_llm_models(self) -> list[dict]:
         """Returns list of available local LLM models and their status."""
         llm_dir = self.get_models_dir() / "llm"
         pgemma = llm_dir / "gemma-3-4b-it-Q4_K_M.gguf"
-        p3b = llm_dir / "qwen2.5-3b-instruct-q4_k_m.gguf"
-        p4b = llm_dir / "Qwen3-4B-Instruct-2507-Q4_K_M.gguf"
         return [
             {
                 "id": "gemma-3-4b",
-                "name": "Google Gemma 3 4B Instruct (4-bit Q4_K_M) - Disiplinli & Doğru (Önerilen)",
+                "name": "Google Gemma 3 4B Instruct (4-bit Q4_K_M) - Disiplinli & Doğru",
                 "available": pgemma.exists(),
                 "path": str(pgemma)
-            },
-            {
-                "id": "qwen2.5-3b",
-                "name": "Qwen 2.5 3B Instruct (4-bit Q4_K_M) - Hafif & Hızlı",
-                "available": p3b.exists(),
-                "path": str(p3b)
-            },
-            {
-                "id": "qwen3-4b",
-                "name": "Qwen3 4B Instruct 2507 (4-bit Q4_K_M) - Yüksek Kapasite",
-                "available": p4b.exists(),
-                "path": str(p4b)
             }
         ]
 
