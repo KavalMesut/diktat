@@ -9,7 +9,7 @@ if [ -d "venv" ]; then
     # CUDA runtime wheels keep their shared libraries inside site-packages.
     # CTranslate2/Faster-Whisper loads them through the system dynamic loader.
     DIKTAT_CUDA_LIBS=""
-    for DIKTAT_CUDA_DIR in "$VIRTUAL_ENV"/lib/python*/site-packages/nvidia/{cublas,cudnn,cuda_nvrtc}/lib; do
+    for DIKTAT_CUDA_DIR in "$VIRTUAL_ENV"/lib/python*/site-packages/nvidia/{cublas,cudnn,cuda_nvrtc,cuda_runtime}/lib; do
         if [ -d "$DIKTAT_CUDA_DIR" ]; then
             DIKTAT_CUDA_LIBS="${DIKTAT_CUDA_LIBS:+$DIKTAT_CUDA_LIBS:}$DIKTAT_CUDA_DIR"
         fi

@@ -24,6 +24,7 @@ PACKAGES=(
     wtype
     git
     cmake
+    cuda
     base-devel
 )
 
@@ -48,19 +49,21 @@ source venv/bin/activate
 # 3. Pip Güncelleme ve Bağımlılıklar (CUDA Hızlandırmalı)
 echo -e "\n[3/5] Python kütüphaneleri ve CUDA hızlandırması kuruluyor..."
 pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
 
 # NVIDIA GPU ve çalışan sürücü tespiti
 if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
-    echo "⚡ NVIDIA GPU tespit edildi! llama-cpp-python CUDA desteğiyle derleniyor..."
-    CMAKE_ARGS="-DGGML_CUDA=on" pip install --no-cache-dir llama-cpp-python
-    # Faster-Whisper/CTranslate2 loads these shared libraries at runtime.
-    pip install nvidia-cublas-cu12 nvidia-cudnn-cu12
+    echo "⚡ NVIDIA GPU tespit edildi! llama-cpp-python CUDA desteğiyle bu bilgisayar için derleniyor..."
+    # Build locally so the binary matches both the installed CUDA toolkit and
+    # the host CPU.  Generic/pre-built wheels can silently be CPU-only or use
+    # an unsupported instruction set.
+    CMAKE_ARGS="-DGGML_CUDA=on" CMAKE_BUILD_PARALLEL_LEVEL=2 \
+        pip install --force-reinstall --no-cache-dir --no-deps \
+        --no-binary=llama-cpp-python llama-cpp-python
 else
     echo "ℹ️ Standart CPU kurulumu yapılıyor..."
     pip install llama-cpp-python
 fi
-
-pip install -r requirements.txt
 
 # 4. Yerel Yapay Zeka Modellerini İndirme
 echo -e "\n[4/5] Yerel yapay zeka modelleri (Whisper + Gemma 3 4B) indiriliyor..."
