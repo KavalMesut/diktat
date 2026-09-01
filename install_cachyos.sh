@@ -20,6 +20,7 @@ PACKAGES=(
     pipewire-pulse
     pipewire-alsa
     xdotool
+    ydotool
     wl-clipboard
     wtype
     git
@@ -34,7 +35,7 @@ if command -v pacman &> /dev/null; then
 elif command -v apt &> /dev/null; then
     echo "Debian / Ubuntu paket yöneticisi tespit edildi."
     sudo apt update
-    sudo apt install -y python3 python3-pip python3-venv portaudio19-dev libasound2-dev xdotool wl-clipboard cmake build-essential
+    sudo apt install -y python3 python3-pip python3-venv portaudio19-dev libasound2-dev xdotool ydotool wl-clipboard cmake build-essential
 else
     echo "⚠️ Bilinmeyen paket yöneticisi. Lütfen portaudio, xdotool ve wl-clipboard paketlerinin kurulu olduğundan emin olun."
 fi
@@ -92,6 +93,24 @@ StartupNotify=true
 EOF
 
 chmod +x "$DESKTOP_DIR/diktat.desktop"
+
+# ydotoold needs the session ACL for /dev/uinput.  That ACL can appear shortly
+# after the user service starts at login; keep retrying until it is ready rather
+# than exhausting systemd's default five rapid retries for the whole session.
+if command -v systemctl &> /dev/null; then
+    YDOTOOL_DROPIN_DIR="$HOME/.config/systemd/user/ydotool.service.d"
+    mkdir -p "$YDOTOOL_DROPIN_DIR"
+    cat > "$YDOTOOL_DROPIN_DIR/retry-until-uinput-ready.conf" <<'EOF'
+[Unit]
+StartLimitIntervalSec=0
+
+[Service]
+RestartSec=5s
+EOF
+    systemctl --user daemon-reload
+    systemctl --user enable ydotool.service
+    systemctl --user restart ydotool.service || true
+fi
 
 echo "=================================================="
 echo "✅ Diktat kurulumu başarıyla tamamlandı!"
