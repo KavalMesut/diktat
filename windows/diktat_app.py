@@ -58,8 +58,35 @@ def play_beep(freq: int = 1000, duration_ms: int = 80):
     except Exception:
         pass
 
-def platform_paste():
-    """Cross-platform keyboard injection to paste clipboard content into the active window."""
+def _run_paste_command(command: list[str], backend: str) -> bool:
+    """Run one paste backend and report whether it actually accepted the key event."""
+    try:
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            timeout=1.0,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        print(f"[Diktat] {backend} ile yapıştırma başarısız: {error}", flush=True)
+        return False
+
+    if result.returncode == 0:
+        print(f"[Diktat] Otomatik yapıştırma gönderildi ({backend}).", flush=True)
+        return True
+
+    details = (result.stderr or result.stdout or "bilinmeyen hata").strip()
+    print(
+        f"[Diktat] {backend} ile yapıştırma başarısız "
+        f"(çıkış {result.returncode}): {details}",
+        flush=True,
+    )
+    return False
+
+
+def platform_paste() -> bool:
+    """Send Ctrl+V to the focused application and return whether a backend accepted it."""
     if sys.platform == "win32" and user32:
         VK_CONTROL = 0x11
         VK_V = 0x56
@@ -71,48 +98,53 @@ def platform_paste():
         user32.keybd_event(VK_V, 0, KEYEVENTF_KEYUP, 0)
         time.sleep(0.02)
         user32.keybd_event(VK_CONTROL, 0, KEYEVENTF_KEYUP, 0)
-        return
+        return True
 
     if sys.platform.startswith("linux"):
-        import subprocess
-        # 1. Native Wayland via wtype (CachyOS / Hyprland / KDE Wayland)
-        if shutil.which("wtype"):
-            try:
-                subprocess.run(["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"], timeout=1.0)
-                return
-            except Exception:
-                pass
-        # 2. X11 / XWayland via xdotool
-        if shutil.which("xdotool"):
-            try:
-                subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+v"], timeout=1.0)
-                return
-            except Exception:
-                pass
-        # 3. ydotool fallback
-        if shutil.which("ydotool"):
-            try:
-                subprocess.run(["ydotool", "key", "29:1", "47:1", "47:0", "29:0"], timeout=1.0)
-                return
-            except Exception:
-                pass
-        # 4. pynput fallback
+        is_wayland = bool(os.environ.get("WAYLAND_DISPLAY"))
+
+        # ydotool sends a kernel-level virtual keyboard event, so it works with
+        # KDE Wayland as well as native Wayland and XWayland applications.  It
+        # must be tried before wtype: KDE normally does not expose the virtual
+        # keyboard protocol required by wtype.
+        backends = []
+        if is_wayland:
+            backends.extend([
+                ("ydotool", ["ydotool", "key", "29:1", "47:1", "47:0", "29:0"]),
+                ("wtype", ["wtype", "-M", "ctrl", "-k", "v", "-m", "ctrl"]),
+                ("xdotool", ["xdotool", "key", "--clearmodifiers", "ctrl+v"]),
+            ])
+        else:
+            backends.extend([
+                ("xdotool", ["xdotool", "key", "--clearmodifiers", "ctrl+v"]),
+                ("ydotool", ["ydotool", "key", "29:1", "47:1", "47:0", "29:0"]),
+            ])
+
+        for backend, command in backends:
+            if shutil.which(backend) and _run_paste_command(command, backend):
+                return True
+
+        # Last-resort fallback for desktop environments that let pynput inject.
         try:
             kb = pynput_keyboard.Controller()
             with kb.pressed(pynput_keyboard.Key.ctrl):
                 kb.tap('v')
-            return
+            print("[Diktat] Otomatik yapıştırma gönderildi (pynput).", flush=True)
+            return True
         except Exception as e:
-            print(f"Paste fallback error: {e}")
-            return
+            print(f"[Diktat] pynput ile yapıştırma başarısız: {e}", flush=True)
+            return False
 
     if sys.platform == "darwin":
         try:
             kb = pynput_keyboard.Controller()
             with kb.pressed(pynput_keyboard.Key.cmd):
                 kb.tap('v')
+            return True
         except Exception:
-            pass
+            return False
+
+    return False
 
 # ---------------------------------------------------------
 # Signals Bridge (Thread-Safe Qt Signals)
@@ -221,16 +253,16 @@ class FloatingHUD(QWidget):
         self.status_text = text
         if state in ("recording", "streaming"):
             self.show()
-        elif state in ("transcribing", "cleaning", "done", "error"):
+        elif state in ("transcribing", "cleaning", "done", "copied", "error"):
             self.show()
-            if state in ("done", "error"):
+            if state in ("done", "copied", "error"):
                 QTimer.singleShot(1800, self._auto_hide_if_done)
         elif state == "idle":
             self.hide()
         self.update()
 
     def _auto_hide_if_done(self):
-        if self.state in ("done", "error", "idle"):
+        if self.state in ("done", "copied", "error", "idle"):
             self.hide()
             self.state = "idle"
 
@@ -346,6 +378,15 @@ class FloatingHUD(QWidget):
             painter.setPen(QPen(QColor(255, 241, 209)))
             painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
             painter.drawText(46, dot_y + 4, "✓ Yapıştırıldı")
+
+        elif self.state == "copied":
+            painter.setBrush(QBrush(QColor(255, 145, 0)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPoint(dot_x, dot_y), 5, 5)
+
+            painter.setPen(QPen(QColor(255, 241, 209)))
+            painter.setFont(QFont("Segoe UI", 9, QFont.Weight.Bold))
+            painter.drawText(46, dot_y + 4, "Metin panoya kopyalandı")
 
         elif self.state == "error":
             # #DF301C Red indicator
@@ -1237,11 +1278,15 @@ class DiktatApplication:
         if self.config_mgr.get("auto_paste", True):
             time.sleep(0.04)
             try:
-                platform_paste()
+                if platform_paste():
+                    self.signals.status_changed.emit("streaming", "⚡ Cümle yazıldı")
+                else:
+                    self.signals.status_changed.emit("error", "Metin panoda; yapıştırılamadı")
+                return
             except Exception as e:
                 print(f"Streaming paste error: {e}")
 
-        self.signals.status_changed.emit("streaming", "⚡ Cümle yazıldı")
+        self.signals.status_changed.emit("copied", "Metin panoya kopyalandı")
 
     def toggle_recording(self):
         if self.is_processing:
@@ -1350,11 +1395,15 @@ class DiktatApplication:
         if self.config_mgr.get("auto_paste", True):
             time.sleep(0.06)
             try:
-                platform_paste()
+                if platform_paste():
+                    self.signals.status_changed.emit("done", "Yapıştırıldı")
+                else:
+                    self.signals.status_changed.emit("copied", "Metin panoya kopyalandı")
+                return
             except Exception as e:
                 print(f"Platform paste error: {e}")
 
-        self.signals.status_changed.emit("done", "Yapıştırıldı")
+        self.signals.status_changed.emit("copied", "Metin panoya kopyalandı")
 
     def _on_error(self, err_msg: str):
         self.signals.status_changed.emit("error", err_msg)
