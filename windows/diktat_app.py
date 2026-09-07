@@ -28,7 +28,8 @@ from PyQt6.QtNetwork import QLocalServer, QLocalSocket
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QLabel, QVBoxLayout, QHBoxLayout,
     QSystemTrayIcon, QMenu, QDialog, QLineEdit, QComboBox,
-    QCheckBox, QPushButton, QTextEdit, QGroupBox, QMessageBox
+    QCheckBox, QPushButton, QTextEdit, QGroupBox, QMessageBox,
+    QScrollArea, QFrame
 )
 from PyQt6.QtGui import QIcon, QPainter, QColor, QFont, QPen, QBrush, QPixmap, QAction
 
@@ -764,8 +765,8 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.config_mgr = config_mgr
         self.setWindowTitle("Diktat - Ayarlar")
-        self.setMinimumSize(600, 780)
-        self.resize(620, 830)
+        self.resize(640, 820)
+        self.setMinimumSize(560, 520)
 
         check_path = get_ui_asset_path("icon_check.png")
         chevron_path = get_ui_asset_path("icon_chevron.png")
@@ -786,9 +787,9 @@ class SettingsDialog(QDialog):
                 color: #FFF1D1;
                 border: 1px solid #23334e;
                 border-radius: 8px;
-                padding: 8px 12px;
+                padding: 7px 12px;
                 font-size: 12px;
-                min-height: 20px;
+                min-height: 22px;
                 selection-background-color: #00B7CD;
             }}
             QLineEdit:focus, QComboBox:focus {{
@@ -820,7 +821,8 @@ class SettingsDialog(QDialog):
                 color: #FFF1D1;
                 font-size: 12px;
                 spacing: 11px;
-                padding: 4px 0px;
+                padding: 3px 0px;
+                min-height: 20px;
             }}
             QCheckBox::indicator {{
                 width: 18px;
@@ -854,11 +856,45 @@ class SettingsDialog(QDialog):
                 background-color: #0c121e;
                 color: #FF9100;
             }}
+            QScrollArea {{
+                background: transparent;
+                border: none;
+            }}
+            QScrollBar:vertical {{
+                background-color: #080d17;
+                width: 8px;
+                margin: 0px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: #1c2a42;
+                min-height: 28px;
+                border-radius: 4px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: #00B7CD;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+                height: 0px;
+            }}
         """)
 
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 16, 24, 20)
-        layout.setSpacing(14)
+        # Main Root Layout
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(18, 14, 18, 16)
+        root_layout.setSpacing(12)
+
+        # Scrollable Settings Container (Prevents overlapping on any screen size or DPI scale)
+        scroll = QScrollArea(self)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
+        scroll_content = QWidget()
+        scroll_content.setStyleSheet("background: transparent;")
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setContentsMargins(4, 0, 10, 8)
+        content_layout.setSpacing(14)
 
         # 1. API & Model Settings
         api_group = QGroupBox("Yapay Zeka Modeli")
@@ -906,7 +942,7 @@ class SettingsDialog(QDialog):
         self.combo_provider.currentIndexChanged.connect(self._on_provider_changed)
         self._on_provider_changed(self.combo_provider.currentIndex())
 
-        layout.addWidget(api_group)
+        content_layout.addWidget(api_group)
 
         # 2. General Preferences
         gen_group = QGroupBox("Diktat Tercihleri")
@@ -915,7 +951,7 @@ class SettingsDialog(QDialog):
         gen_layout.setSpacing(10)
 
         # Shortcuts and Triggers
-        gen_layout.addWidget(QLabel("Tetikleme && Kısayol Tercihleri:"))
+        gen_layout.addWidget(QLabel("Tetikleme ve Kısayol Tercihleri:"))
         self.chk_mouse_trigger = QCheckBox("🖱️ Fare Tekerleğine Çift Tıklama ile Başlat / Durdur (Tık-Tık - Varsayılan)")
         self.chk_mouse_trigger.setChecked(self.config_mgr.get("mouse_trigger_enabled", True))
         gen_layout.addWidget(self.chk_mouse_trigger)
@@ -981,7 +1017,7 @@ class SettingsDialog(QDialog):
         gen_layout.addWidget(self.combo_corner)
 
         # Distinct spacing between comboboxes and checkboxes
-        gen_layout.addSpacing(10)
+        gen_layout.addSpacing(6)
 
         # Checkboxes
         self.chk_autostart = QCheckBox("Windows başlangıcında otomatik başlat (Arka planda)")
@@ -1001,7 +1037,7 @@ class SettingsDialog(QDialog):
         self.chk_sound.setChecked(self.config_mgr.get("play_sound", True))
         gen_layout.addWidget(self.chk_sound)
 
-        layout.addWidget(gen_group)
+        content_layout.addWidget(gen_group)
 
         # 3. Glossary
         dict_group = QGroupBox("Özel İsimler && Terimler Sözlüğü")
@@ -1011,11 +1047,15 @@ class SettingsDialog(QDialog):
         self.txt_glossary = QLineEdit(self.config_mgr.get("glossary", ""))
         self.txt_glossary.setPlaceholderText("Kubernetes, Grafana, PyQt, Claude, Gemini...")
         dict_layout.addWidget(self.txt_glossary)
-        layout.addWidget(dict_group)
+        content_layout.addWidget(dict_group)
 
-        # Buttons
+        # Mount scroll widget into scroll area and scroll area into root
+        scroll.setWidget(scroll_content)
+        root_layout.addWidget(scroll, 1)
+
+        # Bottom Buttons Bar (Always pinned at the bottom, never squeezed or pushed out)
         btn_layout = QHBoxLayout()
-        btn_layout.setContentsMargins(0, 4, 0, 0)
+        btn_layout.setContentsMargins(4, 4, 4, 0)
         
         btn_cancel = QPushButton("İptal")
         btn_cancel.setStyleSheet("""
@@ -1076,7 +1116,7 @@ class SettingsDialog(QDialog):
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_save)
-        layout.addLayout(btn_layout)
+        root_layout.addLayout(btn_layout)
 
     def _manual_check_update(self):
         from .updater import check_for_updates
