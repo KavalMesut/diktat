@@ -124,6 +124,7 @@ class AppSignals(QObject):
     error_occurred = pyqtSignal(str)
     text_processed = pyqtSignal(str, str)
     sentence_streamed = pyqtSignal(str)
+    update_available = pyqtSignal(dict)
 
 # ---------------------------------------------------------
 # Corner Floating HUD
@@ -654,6 +655,110 @@ def get_ui_asset_path(filename: str) -> str:
             return p.resolve().as_posix()
     return filename
 
+# ---------------------------------------------------------
+# In-App Update Dialog GUI
+# ---------------------------------------------------------
+class UpdateDialog(QDialog):
+    def __init__(self, update_info: dict, parent=None):
+        super().__init__(parent)
+        self.update_info = update_info
+        self.setWindowTitle("Diktat - Güncelleme Mevcut")
+        self.setFixedSize(500, 270)
+        self.setStyleSheet("""
+            QDialog {
+                background-color: #0c121e;
+                color: #FFF1D1;
+                font-family: 'Segoe UI', 'Segoe UI Variable', sans-serif;
+            }
+            QLabel {
+                color: #FFF1D1;
+            }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(24, 22, 24, 20)
+        layout.setSpacing(12)
+
+        title = QLabel("🎉 Yeni Bir Diktat Sürümü Mevcut!")
+        title.setStyleSheet("font-size: 16px; font-weight: bold; color: #FF9100;")
+        layout.addWidget(title)
+
+        msg_text = self.update_info.get("message", "Yeni geliştirmeler ve hata düzeltmeleri.")
+        desc = QLabel(f"<b>Son Değişiklik:</b> {msg_text}")
+        desc.setWordWrap(True)
+        desc.setStyleSheet("font-size: 13px; color: #FFF1D1; line-height: 1.4;")
+        layout.addWidget(desc)
+
+        sha = self.update_info.get("remote_sha", "")
+        author = self.update_info.get("author", "Diktat")
+        details = QLabel(f"Yeni Sürüm: {sha} | Geliştirici: {author}")
+        details.setStyleSheet("font-size: 11px; color: #00B7CD;")
+        layout.addWidget(details)
+
+        self.lbl_status = QLabel("Güncellemek ve Diktat'ı yeniden başlatmak için butona tıklayın.")
+        self.lbl_status.setStyleSheet("font-size: 11px; color: #8fa0b5;")
+        layout.addWidget(self.lbl_status)
+
+        layout.addStretch()
+
+        btn_box = QHBoxLayout()
+        self.btn_later = QPushButton("Daha Sonra")
+        self.btn_later.setStyleSheet("""
+            QPushButton {
+                background-color: #1a2538;
+                color: #FFF1D1;
+                border: 1px solid #2d3e5b;
+                border-radius: 8px;
+                padding: 9px 20px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover { background-color: #27374e; }
+        """)
+        self.btn_later.clicked.connect(self.reject)
+
+        self.btn_update = QPushButton("🚀 Şimdi Güncelle ve Yeniden Başlat")
+        self.btn_update.setStyleSheet("""
+            QPushButton {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #DF301C, stop:1 #FF9100);
+                color: #FFF1D1;
+                border: none;
+                border-radius: 8px;
+                padding: 9px 24px;
+                font-weight: bold;
+                font-size: 12px;
+            }
+            QPushButton:hover {
+                background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #f03e29, stop:1 #ffa31a);
+            }
+        """)
+        self.btn_update.clicked.connect(self._start_update)
+
+        btn_box.addStretch()
+        btn_box.addWidget(self.btn_later)
+        btn_box.addWidget(self.btn_update)
+        layout.addLayout(btn_box)
+
+    def _start_update(self):
+        self.btn_update.setEnabled(False)
+        self.btn_later.setEnabled(False)
+        self.lbl_status.setText("⏳ Yeni sürüm çekiliyor, lütfen bekleyin...")
+        self.lbl_status.setStyleSheet("font-size: 12px; color: #FF9100; font-weight: bold;")
+
+        def worker():
+            from .updater import apply_update, restart_diktat
+            ok, msg = apply_update()
+            if ok:
+                self.lbl_status.setText("✅ Güncelleme tamamlandı! Diktat yeniden başlatılıyor...")
+                time.sleep(1.2)
+                restart_diktat()
+            else:
+                self.lbl_status.setText(f"❌ Güncelleme hatası: {msg[:65]}")
+                self.lbl_status.setStyleSheet("font-size: 11px; color: #DF301C;")
+                self.btn_later.setEnabled(True)
+
+        threading.Thread(target=worker, daemon=True).start()
+
 class SettingsDialog(QDialog):
     def __init__(self, config_mgr: ConfigManager, parent=None):
         super().__init__(parent)
@@ -949,10 +1054,40 @@ class SettingsDialog(QDialog):
         """)
         btn_save.clicked.connect(self.save_and_close)
 
+        btn_check_update = QPushButton("🔄 Güncellemeleri Denetle")
+        btn_check_update.setStyleSheet("""
+            QPushButton {
+                background-color: #121d30;
+                color: #00B7CD;
+                border: 1px solid #1c2a42;
+                border-radius: 8px;
+                padding: 9px 16px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #1a2942;
+                border-color: #00B7CD;
+            }
+        """)
+        btn_check_update.clicked.connect(self._manual_check_update)
+
+        btn_layout.addWidget(btn_check_update)
         btn_layout.addStretch()
         btn_layout.addWidget(btn_cancel)
         btn_layout.addWidget(btn_save)
         layout.addLayout(btn_layout)
+
+    def _manual_check_update(self):
+        from .updater import check_for_updates
+        info = check_for_updates()
+        if info.get("update_available"):
+            dlg = UpdateDialog(info, parent=self)
+            dlg.exec()
+        elif info.get("error"):
+            QMessageBox.warning(self, "Güncelleme Denetimi", f"Güncelleme sunucusuna erişilemedi:\n{info['error']}")
+        else:
+            QMessageBox.information(self, "Diktat Güncel", f"Tebrikler! Diktat en son sürümdedir.\n(Mevcut sürüm: {info.get('local_sha', 'Güncel')})")
 
     def save_and_close(self):
         self.config_mgr.set("gemini_api_key", self.txt_gemini.text().strip())
@@ -1065,15 +1200,24 @@ class DiktatApplication:
         self.sec_timer = QTimer()
         self.sec_timer.timeout.connect(self.on_second_tick)
 
+        self.latest_update_info = None
+        self.act_update = None
+
         # Setup Single-Instance IPC Server (Universal for Windows Named Pipes & Linux Unix Sockets)
         self.ipc_server = None
         self._setup_ipc_server()
+
+        # Automatic update check in background (first check after 7s, then every 4h)
+        QTimer.singleShot(7000, self._check_updates_async)
+        self.update_check_timer = QTimer()
+        self.update_check_timer.timeout.connect(self._check_updates_async)
+        self.update_check_timer.start(4 * 3600 * 1000)
 
         prov = self.config_mgr.get("provider", "local")
         engine_label = "Yerel GPU (RTX 4060 Ti)" if prov == "local" else "Bulut AI"
         self.tray.showMessage(
             "Diktat Hazır",
-            f"Diktat arka planda hazır ({engine_label}). İstediğiniz yazı alanında Ctrl + Space tuşlarına basarak dikte edin.",
+            f"Diktat arka planda hazır ({engine_label}). Fare tekerleğine çift tıklayarak veya Ctrl + Space ile dikte edin.",
             QSystemTrayIcon.MessageIcon.Information,
             3000
         )
@@ -1113,6 +1257,7 @@ class DiktatApplication:
         self.signals.level_updated.connect(self.hud.set_db)
         self.signals.text_processed.connect(self._on_text_ready)
         self.signals.sentence_streamed.connect(self._on_sentence_streamed)
+        self.signals.update_available.connect(self._on_update_available)
         self.signals.error_occurred.connect(self._on_error)
 
     def setup_tray(self):
@@ -1142,10 +1287,11 @@ class DiktatApplication:
             icon = QIcon(pixmap)
 
         self.tray = QSystemTrayIcon(icon, self.app)
-        self.tray.setToolTip("Diktat - AI Sesli Dikte (Ctrl + Space)")
+        self.tray.setToolTip("Diktat - AI Sesli Dikte (Tekerlek Çift Tık / Ctrl+Space)")
+        self.tray.messageClicked.connect(self._on_tray_message_clicked)
 
-        menu = QMenu()
-        menu.setStyleSheet("""
+        self.tray_menu = QMenu()
+        self.tray_menu.setStyleSheet("""
             QMenu {
                 background-color: #0c121e;
                 color: #FFF1D1;
@@ -1169,24 +1315,68 @@ class DiktatApplication:
             }
         """)
 
-        act_toggle = QAction("🎙️ Diktatı Başlat/Durdur (Ctrl+Space)", menu)
+        act_toggle = QAction("🎙️ Diktatı Başlat/Durdur", self.tray_menu)
         act_toggle.triggered.connect(self.toggle_recording)
-        menu.addAction(act_toggle)
+        self.tray_menu.addAction(act_toggle)
 
-        menu.addSeparator()
+        self.tray_menu.addSeparator()
 
-        act_settings = QAction("⚙️ Ayarlar...", menu)
+        act_settings = QAction("⚙️ Ayarlar...", self.tray_menu)
         act_settings.triggered.connect(self.open_settings)
-        menu.addAction(act_settings)
+        self.tray_menu.addAction(act_settings)
 
-        menu.addSeparator()
+        self.tray_menu.addSeparator()
 
-        act_quit = QAction("❌ Çıkış", menu)
+        act_quit = QAction("❌ Çıkış", self.tray_menu)
         act_quit.triggered.connect(self.quit_app)
-        menu.addAction(act_quit)
+        self.tray_menu.addAction(act_quit)
 
-        self.tray.setContextMenu(menu)
+        self.tray.setContextMenu(self.tray_menu)
         self.tray.show()
+
+    def _check_updates_async(self):
+        def worker():
+            from .updater import check_for_updates
+            info = check_for_updates()
+            if info.get("update_available"):
+                self.signals.update_available.emit(info)
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_update_available(self, update_info: dict):
+        self.latest_update_info = update_info
+        if not self.act_update and hasattr(self, 'tray_menu'):
+            self.act_update = QAction("✨ Yeni Güncelleme Var! (Şimdi Güncelle)", self.tray_menu)
+            self.act_update.triggered.connect(self.show_update_dialog)
+            first_action = self.tray_menu.actions()[0] if self.tray_menu.actions() else None
+            if first_action:
+                self.tray_menu.insertAction(first_action, self.act_update)
+                self.tray_menu.insertSeparator(first_action)
+
+        msg_preview = update_info.get("message", "Yeni geliştirmeler hazır.")
+        self.tray.showMessage(
+            "🎉 Diktat Güncellemesi Mevcut",
+            f"Yeni sürüm hazır: {msg_preview}\nGüncellemek için tıklayın.",
+            QSystemTrayIcon.MessageIcon.Information,
+            8000
+        )
+
+    def _on_tray_message_clicked(self):
+        if getattr(self, 'latest_update_info', None):
+            self.show_update_dialog()
+
+    def show_update_dialog(self):
+        if getattr(self, 'latest_update_info', None):
+            dlg = UpdateDialog(self.latest_update_info)
+            dlg.exec()
+        else:
+            from .updater import check_for_updates
+            info = check_for_updates()
+            if info.get("update_available"):
+                self.latest_update_info = info
+                dlg = UpdateDialog(info)
+                dlg.exec()
+            else:
+                QMessageBox.information(None, "Diktat Güncel", "Tebrikler! Diktat en son sürümdedir.")
 
     def _on_sentence_recorded_chunk(self, audio_data: np.ndarray, is_final: bool):
         """Callback from AudioRecorder when a full sentence/thought segment is detected."""
