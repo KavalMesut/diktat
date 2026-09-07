@@ -9,7 +9,7 @@ import queue
 import numpy as np
 import sounddevice as sd
 import pyperclip
-from pynput import keyboard as pynput_keyboard
+from pynput import keyboard as pynput_keyboard, mouse as pynput_mouse
 
 try:
     import winsound
@@ -555,8 +555,9 @@ class AudioRecorder:
 # Global Keyboard Listener (Pynput Hook)
 # ---------------------------------------------------------
 class GlobalKeyListener:
-    def __init__(self, signals: AppSignals):
+    def __init__(self, signals: AppSignals, enabled: bool = True):
         self.signals = signals
+        self.enabled = enabled
         self.ctrl_pressed = False
         self.alt_pressed = False
         self.last_trigger_time = 0
@@ -575,7 +576,7 @@ class GlobalKeyListener:
             if self.ctrl_pressed and self.alt_pressed:
                 self.last_trigger_time = now
                 self.signals.cancel_requested.emit()
-            elif self.ctrl_pressed:
+            elif self.ctrl_pressed and self.enabled:
                 self.last_trigger_time = now
                 self.signals.toggle_requested.emit()
 
@@ -592,6 +593,41 @@ class GlobalKeyListener:
         )
         self.listener.daemon = True
         self.listener.start()
+
+    def stop(self):
+        if self.listener:
+            try:
+                self.listener.stop()
+            except Exception:
+                pass
+
+# ---------------------------------------------------------
+# Global Mouse Listener (Mouse Wheel Middle-Click Hook)
+# ---------------------------------------------------------
+class GlobalMouseListener:
+    def __init__(self, signals: AppSignals, enabled: bool = True):
+        self.signals = signals
+        self.enabled = enabled
+        self.last_click_time = 0
+        self.listener = None
+
+    def on_click(self, x, y, button, pressed):
+        if not self.enabled:
+            return
+        if button == pynput_mouse.Button.middle and pressed:
+            now = time.time()
+            if now - self.last_click_time < 0.35:
+                return  # Debounce rapid multi-clicks
+            self.last_click_time = now
+            self.signals.toggle_requested.emit()
+
+    def start(self):
+        try:
+            self.listener = pynput_mouse.Listener(on_click=self.on_click)
+            self.listener.daemon = True
+            self.listener.start()
+        except Exception as e:
+            print(f"Mouse listener start error: {e}")
 
     def stop(self):
         if self.listener:
@@ -770,23 +806,15 @@ class SettingsDialog(QDialog):
         gen_layout.setContentsMargins(16, 22, 16, 16)
         gen_layout.setSpacing(10)
 
-        # Shortcut row
-        hk_row = QHBoxLayout()
-        hk_row.addWidget(QLabel("Global Kısayol:"))
-        lbl_hk = QLabel("Ctrl + Space")
-        lbl_hk.setStyleSheet("""
-            color: #00B7CD;
-            background-color: #080d17;
-            border: 1px solid #1c2a42;
-            border-radius: 6px;
-            padding: 3px 12px;
-            font-weight: bold;
-            font-family: Consolas, monospace;
-            font-size: 13px;
-        """)
-        hk_row.addWidget(lbl_hk)
-        hk_row.addStretch()
-        gen_layout.addLayout(hk_row)
+        # Shortcuts and Triggers
+        gen_layout.addWidget(QLabel("Tetikleme && Kısayol Tercihleri:"))
+        self.chk_mouse_trigger = QCheckBox("🖱️ Fare Orta Tekerlek Tıklaması ile Başlat / Durdur (Varsayılan)")
+        self.chk_mouse_trigger.setChecked(self.config_mgr.get("mouse_trigger_enabled", True))
+        gen_layout.addWidget(self.chk_mouse_trigger)
+
+        self.chk_keyboard_trigger = QCheckBox("⌨️ Klavyeden Ctrl + Space Kısayolu ile Başlat / Durdur")
+        self.chk_keyboard_trigger.setChecked(self.config_mgr.get("keyboard_trigger_enabled", True))
+        gen_layout.addWidget(self.chk_keyboard_trigger)
 
         # Dictation Mode selector (One-Shot vs Streaming)
         gen_layout.addWidget(QLabel("Dikte Modu (Ses İşleme Mantığı):"))
@@ -943,6 +971,10 @@ class SettingsDialog(QDialog):
         chosen_mic = self.combo_mic.currentData() or ""
         self.config_mgr.set("input_device", chosen_mic)
 
+        # Save Trigger Preferences (Mouse & Keyboard)
+        self.config_mgr.set("mouse_trigger_enabled", self.chk_mouse_trigger.isChecked())
+        self.config_mgr.set("keyboard_trigger_enabled", self.chk_keyboard_trigger.isChecked())
+
         corners = ["bottom-right", "bottom-left", "top-right", "top-left"]
         self.config_mgr.set("overlay_corner", corners[self.combo_corner.currentIndex()])
 
@@ -1008,9 +1040,18 @@ class DiktatApplication:
         self.setup_signals()
         self.setup_tray()
 
-        # Start Global Key Listener
-        self.key_listener = GlobalKeyListener(self.signals)
+        # Start Global Key & Mouse Listeners
+        self.key_listener = GlobalKeyListener(
+            self.signals,
+            enabled=self.config_mgr.get("keyboard_trigger_enabled", True)
+        )
         self.key_listener.start()
+
+        self.mouse_listener = GlobalMouseListener(
+            self.signals,
+            enabled=self.config_mgr.get("mouse_trigger_enabled", True)
+        )
+        self.mouse_listener.start()
 
         # Audio level timer
         self.poll_timer = QTimer()
@@ -1302,12 +1343,16 @@ class DiktatApplication:
         if dlg.exec():
             self.ai_client = AIClient(self.config_mgr.config)
             self.recorder.device_name = self.config_mgr.get("input_device", "")
+            self.key_listener.enabled = self.config_mgr.get("keyboard_trigger_enabled", True)
+            self.mouse_listener.enabled = self.config_mgr.get("mouse_trigger_enabled", True)
             self.hud.reposition()
 
     def quit_app(self):
         self.cancel_recording()
         if hasattr(self, 'key_listener') and self.key_listener:
             self.key_listener.stop()
+        if hasattr(self, 'mouse_listener') and self.mouse_listener:
+            self.mouse_listener.stop()
         if hasattr(self, 'ipc_server') and self.ipc_server:
             try:
                 self.ipc_server.close()

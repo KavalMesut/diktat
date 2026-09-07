@@ -24,12 +24,13 @@
 
 ---
 
-## ⌨️ Kısayol Tuşları & Komutlar
+## ⌨️ Tetikleme & Kısayol Tuşları
 
-| Kısayol / Komut | Platform | İşlem |
+| Kısayol / Tetikleyici | Platform | İşlem |
 |---|---|---|
-| **`Ctrl + Space`** | Windows / Linux X11 | Diktatı Başlat / Durdur & Yapıştır |
-| **`Ctrl + Alt + Space`** | Windows / Linux X11 | Diktatı İptal Et |
+| 🖱️ **Fare Orta Tekerlek Tıklaması** | Windows / Linux *(Varsayılan)* | Diktatı Başlat / Durdur & Yapıştır |
+| ⌨️ **`Ctrl + Space`** | Windows / Linux *(İkincil)* | Diktatı Başlat / Durdur & Yapıştır |
+| **`Ctrl + Alt + Space`** | Windows / Linux | Diktatı İptal Et |
 | **`diktat --toggle`** | Linux (Wayland / Hyprland / KDE) | Arka plandaki Diktat kaydını aç/kapa |
 | **`diktat --cancel`** | Linux (CLI) | Kaydı iptal et |
 | **`diktat --settings`** | Tüm Platformlar | Ayarlar penceresini aç |
