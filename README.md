@@ -28,7 +28,7 @@
 
 | Kısayol / Tetikleyici | Platform | İşlem |
 |---|---|---|
-| 🖱️ **Fare Orta Tekerlek Tıklaması** | Windows / Linux *(Varsayılan)* | Diktatı Başlat / Durdur & Yapıştır |
+| 🖱️ **Fare Tekerleğine Çift Tıklama (Tık-Tık)** | Windows / Linux *(Varsayılan)* | Diktatı Başlat / Durdur & Yapıştır |
 | ⌨️ **`Ctrl + Space`** | Windows / Linux *(İkincil)* | Diktatı Başlat / Durdur & Yapıştır |
 | **`Ctrl + Alt + Space`** | Windows / Linux | Diktatı İptal Et |
 | **`diktat --toggle`** | Linux (Wayland / Hyprland / KDE) | Arka plandaki Diktat kaydını aç/kapa |

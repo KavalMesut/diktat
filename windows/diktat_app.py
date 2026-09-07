@@ -616,10 +616,13 @@ class GlobalMouseListener:
             return
         if button == pynput_mouse.Button.middle and pressed:
             now = time.time()
-            if now - self.last_click_time < 0.35:
-                return  # Debounce rapid multi-clicks
-            self.last_click_time = now
-            self.signals.toggle_requested.emit()
+            time_diff = now - self.last_click_time
+            # Double click window: between 50ms and 450ms
+            if 0.05 <= time_diff <= 0.45:
+                self.last_click_time = 0  # Reset so third click doesn't trigger
+                self.signals.toggle_requested.emit()
+            else:
+                self.last_click_time = now
 
     def start(self):
         try:
@@ -808,7 +811,7 @@ class SettingsDialog(QDialog):
 
         # Shortcuts and Triggers
         gen_layout.addWidget(QLabel("Tetikleme && Kısayol Tercihleri:"))
-        self.chk_mouse_trigger = QCheckBox("🖱️ Fare Orta Tekerlek Tıklaması ile Başlat / Durdur (Varsayılan)")
+        self.chk_mouse_trigger = QCheckBox("🖱️ Fare Tekerleğine Çift Tıklama ile Başlat / Durdur (Tık-Tık - Varsayılan)")
         self.chk_mouse_trigger.setChecked(self.config_mgr.get("mouse_trigger_enabled", True))
         gen_layout.addWidget(self.chk_mouse_trigger)
 
