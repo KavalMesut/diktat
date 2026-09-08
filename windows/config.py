@@ -190,8 +190,7 @@ DEFAULT_CONFIG = {
     "cleanup_enabled": True,
     "input_device": "",  # Device name or empty for system default
     "dictation_mode": "batch",  # "batch" (One-Shot) or "streaming" (Sentence-by-Sentence Live)
-    "mouse_trigger_enabled": True,  # Mouse wheel double-click trigger enabled by default
-    "keyboard_trigger_enabled": True  # Ctrl + Space hotkey trigger enabled
+    "custom_hotkey": ""  # Optional user-defined secondary shortcut (e.g. "F8", "Alt + Space")
 }
 
 class ConfigManager:

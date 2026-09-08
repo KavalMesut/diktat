@@ -9,7 +9,7 @@ import queue
 import numpy as np
 import sounddevice as sd
 import pyperclip
-from pynput import keyboard as pynput_keyboard, mouse as pynput_mouse
+from pynput import keyboard as pynput_keyboard
 
 try:
     import winsound
@@ -31,7 +31,7 @@ from PyQt6.QtWidgets import (
     QCheckBox, QPushButton, QTextEdit, QGroupBox, QMessageBox,
     QScrollArea, QFrame
 )
-from PyQt6.QtGui import QIcon, QPainter, QColor, QFont, QPen, QBrush, QPixmap, QAction
+from PyQt6.QtGui import QIcon, QPainter, QColor, QFont, QPen, QBrush, QPixmap, QAction, QKeySequence
 
 from .config import ConfigManager, is_autostart_enabled, set_autostart
 from .api_client import AIClient
@@ -556,37 +556,106 @@ class AudioRecorder:
 # ---------------------------------------------------------
 # Global Keyboard Listener (Pynput Hook)
 # ---------------------------------------------------------
+def parse_hotkey_str(hotkey_str: str):
+    """Parses a hotkey string like 'Ctrl + Shift + D' or 'F8' into a structured matcher."""
+    if not hotkey_str or not hotkey_str.strip():
+        return None
+    raw_parts = [p.strip().lower() for p in hotkey_str.split("+") if p.strip()]
+    if not raw_parts:
+        return None
+
+    req_ctrl = any(p in ("ctrl", "control") for p in raw_parts)
+    req_alt = any(p in ("alt", "option") for p in raw_parts)
+    req_shift = any(p in ("shift",) for p in raw_parts)
+    req_win = any(p in ("win", "cmd", "meta", "super") for p in raw_parts)
+
+    key_parts = [p for p in raw_parts if p not in ("ctrl", "control", "alt", "option", "shift", "win", "cmd", "meta", "super")]
+    target_key = key_parts[-1].replace("_", "").replace(" ", "") if key_parts else None
+    if not target_key:
+        return None
+
+    return {
+        "ctrl": req_ctrl,
+        "alt": req_alt,
+        "shift": req_shift,
+        "win": req_win,
+        "key": target_key
+    }
+
 class GlobalKeyListener:
-    def __init__(self, signals: AppSignals, enabled: bool = True):
+    def __init__(self, signals: AppSignals, custom_hotkey: str = ""):
         self.signals = signals
-        self.enabled = enabled
+        self.custom_hotkey_str = custom_hotkey
+        self.parsed_custom = parse_hotkey_str(custom_hotkey)
         self.ctrl_pressed = False
         self.alt_pressed = False
+        self.shift_pressed = False
+        self.win_pressed = False
         self.last_trigger_time = 0
         self.listener = None
 
+    def set_custom_hotkey(self, custom_hotkey: str):
+        self.custom_hotkey_str = custom_hotkey
+        self.parsed_custom = parse_hotkey_str(custom_hotkey)
+
+    def _get_key_name(self, key):
+        if hasattr(key, 'name') and key.name:
+            return key.name.lower().replace("_", "").replace(" ", "")
+        if hasattr(key, 'char') and key.char:
+            return key.char.lower().strip()
+        return None
+
     def on_press(self, key):
+        # Track modifier states
         if key in (pynput_keyboard.Key.ctrl, pynput_keyboard.Key.ctrl_l, pynput_keyboard.Key.ctrl_r):
             self.ctrl_pressed = True
         elif key in (pynput_keyboard.Key.alt, pynput_keyboard.Key.alt_l, pynput_keyboard.Key.alt_r, pynput_keyboard.Key.alt_gr):
             self.alt_pressed = True
-        elif key == pynput_keyboard.Key.space:
-            now = time.time()
-            if now - self.last_trigger_time < 0.35:
-                return  # Debounce duplicate key events
-            
-            if self.ctrl_pressed and self.alt_pressed:
+        elif key in (pynput_keyboard.Key.shift, pynput_keyboard.Key.shift_l, pynput_keyboard.Key.shift_r):
+            self.shift_pressed = True
+        elif key in (pynput_keyboard.Key.cmd, pynput_keyboard.Key.cmd_l, pynput_keyboard.Key.cmd_r):
+            self.win_pressed = True
+
+        now = time.time()
+        key_name = self._get_key_name(key)
+
+        # 1. Primary Cancel: Ctrl + Alt + Space
+        if key == pynput_keyboard.Key.space and self.ctrl_pressed and self.alt_pressed:
+            if now - self.last_trigger_time >= 0.35:
                 self.last_trigger_time = now
                 self.signals.cancel_requested.emit()
-            elif self.ctrl_pressed and self.enabled:
+            return
+
+        # 2. Primary Toggle: Ctrl + Space (Default - Always Active)
+        if key == pynput_keyboard.Key.space and self.ctrl_pressed and not self.alt_pressed:
+            if now - self.last_trigger_time >= 0.35:
                 self.last_trigger_time = now
                 self.signals.toggle_requested.emit()
+            return
+
+        # 3. Custom Secondary Hotkey (User Defined, e.g. F8, Pause, Alt+D, etc.)
+        if self.parsed_custom and key_name:
+            if key_name == self.parsed_custom["key"]:
+                mods_match = (
+                    self.ctrl_pressed == self.parsed_custom["ctrl"] and
+                    self.alt_pressed == self.parsed_custom["alt"] and
+                    self.shift_pressed == self.parsed_custom["shift"] and
+                    self.win_pressed == self.parsed_custom["win"]
+                )
+                if mods_match:
+                    if now - self.last_trigger_time >= 0.35:
+                        self.last_trigger_time = now
+                        self.signals.toggle_requested.emit()
 
     def on_release(self, key):
         if key in (pynput_keyboard.Key.ctrl, pynput_keyboard.Key.ctrl_l, pynput_keyboard.Key.ctrl_r):
             self.ctrl_pressed = False
         elif key in (pynput_keyboard.Key.alt, pynput_keyboard.Key.alt_l, pynput_keyboard.Key.alt_r, pynput_keyboard.Key.alt_gr):
             self.alt_pressed = False
+        elif key in (pynput_keyboard.Key.shift, pynput_keyboard.Key.shift_l, pynput_keyboard.Key.shift_r):
+            self.shift_pressed = False
+        elif key in (pynput_keyboard.Key.cmd, pynput_keyboard.Key.cmd_l, pynput_keyboard.Key.cmd_r):
+            self.win_pressed = False
 
     def start(self):
         self.listener = pynput_keyboard.Listener(
@@ -604,42 +673,168 @@ class GlobalKeyListener:
                 pass
 
 # ---------------------------------------------------------
-# Global Mouse Listener (Mouse Wheel Middle-Click Hook)
+# Interactive Hotkey Recorder Button (Game-Style Input Selector)
 # ---------------------------------------------------------
-class GlobalMouseListener:
-    def __init__(self, signals: AppSignals, enabled: bool = True):
-        self.signals = signals
-        self.enabled = enabled
-        self.last_click_time = 0
-        self.listener = None
+class HotkeyRecorderButton(QPushButton):
+    hotkeyChanged = pyqtSignal(str)
 
-    def on_click(self, x, y, button, pressed):
-        if not self.enabled:
-            return
-        if button == pynput_mouse.Button.middle and pressed:
-            now = time.time()
-            time_diff = now - self.last_click_time
-            # Double click window: between 50ms and 450ms
-            if 0.05 <= time_diff <= 0.45:
-                self.last_click_time = 0  # Reset so third click doesn't trigger
-                self.signals.toggle_requested.emit()
+    def __init__(self, current_hotkey: str = "", parent=None):
+        super().__init__(parent)
+        self.current_hotkey = current_hotkey
+        self.is_recording = False
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._update_display()
+
+    def _update_display(self):
+        if self.is_recording:
+            self.setText("⌨️  Bir tuşa basın... (İptal: Esc)")
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: #1a2538;
+                    color: #FF9100;
+                    border: 2px solid #FF9100;
+                    border-radius: 8px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                    font-size: 12px;
+                    text-align: center;
+                }
+            """)
+        else:
+            if self.current_hotkey:
+                self.setText(f"⌨️  {self.current_hotkey}")
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: #080d17;
+                        color: #00B7CD;
+                        border: 1px solid #1c2a42;
+                        border-radius: 8px;
+                        padding: 8px 16px;
+                        font-weight: bold;
+                        font-family: Consolas, monospace;
+                        font-size: 13px;
+                        text-align: left;
+                    }
+                    QPushButton:hover {
+                        border-color: #00B7CD;
+                        background-color: #0d1524;
+                    }
+                """)
             else:
-                self.last_click_time = now
+                self.setText("➕  İkincil Tuş Belirle (Tıklayın)")
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: #080d17;
+                        color: #8fa0b5;
+                        border: 1px dashed #2d3e5b;
+                        border-radius: 8px;
+                        padding: 8px 16px;
+                        font-size: 12px;
+                        font-weight: 500;
+                        text-align: left;
+                    }
+                    QPushButton:hover {
+                        border-color: #00B7CD;
+                        color: #FFF1D1;
+                        background-color: #0d1524;
+                    }
+                """)
 
-    def start(self):
-        try:
-            self.listener = pynput_mouse.Listener(on_click=self.on_click)
-            self.listener.daemon = True
-            self.listener.start()
-        except Exception as e:
-            print(f"Mouse listener start error: {e}")
+    def mousePressEvent(self, event):
+        if not self.is_recording:
+            self.is_recording = True
+            self._update_display()
+            self.setFocus()
+        else:
+            super().mousePressEvent(event)
 
-    def stop(self):
-        if self.listener:
-            try:
-                self.listener.stop()
-            except Exception:
-                pass
+    def focusOutEvent(self, event):
+        if self.is_recording:
+            self.is_recording = False
+            self._update_display()
+        super().focusOutEvent(event)
+
+    def keyPressEvent(self, event):
+        if not self.is_recording:
+            super().keyPressEvent(event)
+            return
+
+        key = event.key()
+
+        # Escape cancels recording
+        if key == Qt.Key.Key_Escape:
+            self.is_recording = False
+            self._update_display()
+            return
+
+        # Ignore standalone modifier presses while waiting for main key
+        if key in (Qt.Key.Key_Control, Qt.Key.Key_Shift, Qt.Key.Key_Alt, Qt.Key.Key_Meta):
+            return
+
+        # Build modifier sequence
+        parts = []
+        modifiers = event.modifiers()
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            parts.append("Ctrl")
+        if modifiers & Qt.KeyboardModifier.AltModifier:
+            parts.append("Alt")
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            parts.append("Shift")
+        if modifiers & Qt.KeyboardModifier.MetaModifier:
+            parts.append("Win")
+
+        # Resolve clean key name
+        if Qt.Key.Key_F1 <= key <= Qt.Key.Key_F12:
+            key_name = f"F{key - Qt.Key.Key_F1 + 1}"
+        elif key == Qt.Key.Key_Space:
+            key_name = "Space"
+        elif key == Qt.Key.Key_Return:
+            key_name = "Enter"
+        elif key == Qt.Key.Key_Tab:
+            key_name = "Tab"
+        elif key == Qt.Key.Key_Backspace:
+            key_name = "Backspace"
+        elif key == Qt.Key.Key_Insert:
+            key_name = "Insert"
+        elif key == Qt.Key.Key_Delete:
+            key_name = "Delete"
+        elif key == Qt.Key.Key_Home:
+            key_name = "Home"
+        elif key == Qt.Key.Key_End:
+            key_name = "End"
+        elif key == Qt.Key.Key_PageUp:
+            key_name = "PageUp"
+        elif key == Qt.Key.Key_PageDown:
+            key_name = "PageDown"
+        elif key == Qt.Key.Key_Pause:
+            key_name = "Pause"
+        elif key == Qt.Key.Key_CapsLock:
+            key_name = "CapsLock"
+        elif key == Qt.Key.Key_ScrollLock:
+            key_name = "ScrollLock"
+        elif key == Qt.Key.Key_Print:
+            key_name = "PrintScreen"
+        else:
+            text = event.text().upper()
+            if text and text.isprintable() and not text.isspace():
+                key_name = text
+            else:
+                key_name = QKeySequence(key).toString().upper()
+
+        if key_name:
+            parts.append(key_name)
+            final_hotkey = " + ".join(parts)
+            self.current_hotkey = final_hotkey
+            self.is_recording = False
+            self._update_display()
+            self.hotkeyChanged.emit(self.current_hotkey)
+
+    def clear_hotkey(self):
+        self.current_hotkey = ""
+        self.is_recording = False
+        self._update_display()
+        self.hotkeyChanged.emit("")
 
 # ---------------------------------------------------------
 # Settings Dialog GUI
@@ -950,15 +1145,59 @@ class SettingsDialog(QDialog):
         gen_layout.setContentsMargins(16, 22, 16, 16)
         gen_layout.setSpacing(10)
 
-        # Shortcuts and Triggers
-        gen_layout.addWidget(QLabel("Tetikleme ve Kısayol Tercihleri:"))
-        self.chk_mouse_trigger = QCheckBox("🖱️ Fare Tekerleğine Çift Tıklama ile Başlat / Durdur (Tık-Tık - Varsayılan)")
-        self.chk_mouse_trigger.setChecked(self.config_mgr.get("mouse_trigger_enabled", True))
-        gen_layout.addWidget(self.chk_mouse_trigger)
+        # 1. Primary Shortcut Row
+        hk_prim_row = QHBoxLayout()
+        hk_prim_row.addWidget(QLabel("Birincil Kısayol:"))
+        lbl_hk_prim = QLabel("Ctrl + Space")
+        lbl_hk_prim.setStyleSheet("""
+            color: #00B7CD;
+            background-color: #080d17;
+            border: 1px solid #1c2a42;
+            border-radius: 6px;
+            padding: 4px 14px;
+            font-weight: bold;
+            font-family: Consolas, monospace;
+            font-size: 13px;
+        """)
+        lbl_badge = QLabel("Varsayılan & Her Zaman Aktif")
+        lbl_badge.setStyleSheet("color: #FF9100; font-size: 11px; font-weight: 500;")
+        hk_prim_row.addWidget(lbl_hk_prim)
+        hk_prim_row.addWidget(lbl_badge)
+        hk_prim_row.addStretch()
+        gen_layout.addLayout(hk_prim_row)
 
-        self.chk_keyboard_trigger = QCheckBox("⌨️ Klavyeden Ctrl + Space Kısayolu ile Başlat / Durdur")
-        self.chk_keyboard_trigger.setChecked(self.config_mgr.get("keyboard_trigger_enabled", True))
-        gen_layout.addWidget(self.chk_keyboard_trigger)
+        # 2. Secondary Custom Shortcut (Game-Style Input Selector)
+        gen_layout.addWidget(QLabel("İkincil Kısayol (İsteğe Bağlı):"))
+        hk_sec_row = QHBoxLayout()
+        hk_sec_row.setSpacing(8)
+
+        self.btn_hotkey = HotkeyRecorderButton(self.config_mgr.get("custom_hotkey", ""))
+        hk_sec_row.addWidget(self.btn_hotkey, 1)
+
+        btn_clear_hk = QPushButton("Temizle")
+        btn_clear_hk.setStyleSheet("""
+            QPushButton {
+                background-color: #1a2538;
+                color: #8fa0b5;
+                border: 1px solid #2d3e5b;
+                border-radius: 8px;
+                padding: 8px 16px;
+                font-size: 12px;
+                font-weight: 500;
+            }
+            QPushButton:hover {
+                background-color: #27374e;
+                color: #DF301C;
+                border-color: #DF301C;
+            }
+        """)
+        btn_clear_hk.clicked.connect(self.btn_hotkey.clear_hotkey)
+        hk_sec_row.addWidget(btn_clear_hk)
+        gen_layout.addLayout(hk_sec_row)
+
+        lbl_hk_help = QLabel("💡 Butona tıklayıp klavyenizden istediğiniz bir tuşa (F8, F9, Alt+Space, Pause vb.) basın.")
+        lbl_hk_help.setStyleSheet("color: #8fa0b5; font-size: 11px; margin-bottom: 2px;")
+        gen_layout.addWidget(lbl_hk_help)
 
         # Dictation Mode selector (One-Shot vs Streaming)
         gen_layout.addWidget(QLabel("Dikte Modu (Ses İşleme Mantığı):"))
@@ -1149,9 +1388,8 @@ class SettingsDialog(QDialog):
         chosen_mic = self.combo_mic.currentData() or ""
         self.config_mgr.set("input_device", chosen_mic)
 
-        # Save Trigger Preferences (Mouse & Keyboard)
-        self.config_mgr.set("mouse_trigger_enabled", self.chk_mouse_trigger.isChecked())
-        self.config_mgr.set("keyboard_trigger_enabled", self.chk_keyboard_trigger.isChecked())
+        # Save Custom Secondary Hotkey
+        self.config_mgr.set("custom_hotkey", self.btn_hotkey.current_hotkey)
 
         corners = ["bottom-right", "bottom-left", "top-right", "top-left"]
         self.config_mgr.set("overlay_corner", corners[self.combo_corner.currentIndex()])
@@ -1218,18 +1456,12 @@ class DiktatApplication:
         self.setup_signals()
         self.setup_tray()
 
-        # Start Global Key & Mouse Listeners
+        # Start Global Key Listener (Ctrl+Space default + optional secondary hotkey)
         self.key_listener = GlobalKeyListener(
             self.signals,
-            enabled=self.config_mgr.get("keyboard_trigger_enabled", True)
+            custom_hotkey=self.config_mgr.get("custom_hotkey", "")
         )
         self.key_listener.start()
-
-        self.mouse_listener = GlobalMouseListener(
-            self.signals,
-            enabled=self.config_mgr.get("mouse_trigger_enabled", True)
-        )
-        self.mouse_listener.start()
 
         # Audio level timer
         self.poll_timer = QTimer()
@@ -1257,7 +1489,7 @@ class DiktatApplication:
         engine_label = "Yerel GPU (RTX 4060 Ti)" if prov == "local" else "Bulut AI"
         self.tray.showMessage(
             "Diktat Hazır",
-            f"Diktat arka planda hazır ({engine_label}). Fare tekerleğine çift tıklayarak veya Ctrl + Space ile dikte edin.",
+            f"Diktat arka planda hazır ({engine_label}). İstediğiniz yazı alanında Ctrl + Space ile dikte edin.",
             QSystemTrayIcon.MessageIcon.Information,
             3000
         )
@@ -1576,16 +1808,13 @@ class DiktatApplication:
         if dlg.exec():
             self.ai_client = AIClient(self.config_mgr.config)
             self.recorder.device_name = self.config_mgr.get("input_device", "")
-            self.key_listener.enabled = self.config_mgr.get("keyboard_trigger_enabled", True)
-            self.mouse_listener.enabled = self.config_mgr.get("mouse_trigger_enabled", True)
+            self.key_listener.set_custom_hotkey(self.config_mgr.get("custom_hotkey", ""))
             self.hud.reposition()
 
     def quit_app(self):
         self.cancel_recording()
         if hasattr(self, 'key_listener') and self.key_listener:
             self.key_listener.stop()
-        if hasattr(self, 'mouse_listener') and self.mouse_listener:
-            self.mouse_listener.stop()
         if hasattr(self, 'ipc_server') and self.ipc_server:
             try:
                 self.ipc_server.close()

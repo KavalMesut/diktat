@@ -28,8 +28,8 @@
 
 | Kısayol / Tetikleyici | Platform | İşlem |
 |---|---|---|
-| 🖱️ **Fare Tekerleğine Çift Tıklama (Tık-Tık)** | Windows / Linux *(Varsayılan)* | Diktatı Başlat / Durdur & Yapıştır |
-| ⌨️ **`Ctrl + Space`** | Windows / Linux *(İkincil)* | Diktatı Başlat / Durdur & Yapıştır |
+| ⌨️ **`Ctrl + Space`** | Windows / Linux *(Varsayılan & Aktif)* | Diktatı Başlat / Durdur & Yapıştır |
+| 🎮 **Özel İkincil Kısayol** | Windows / Linux *(İsteğe Bağlı)* | Ayarlar'dan dilediğiniz tuş/kombinasyon (örn. `F8`, `Alt+Space`) |
 | **`Ctrl + Alt + Space`** | Windows / Linux | Diktatı İptal Et |
 | **`diktat --toggle`** | Linux (Wayland / Hyprland / KDE) | Arka plandaki Diktat kaydını aç/kapa |
 | **`diktat --cancel`** | Linux (CLI) | Kaydı iptal et |

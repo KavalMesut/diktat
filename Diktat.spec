@@ -5,7 +5,6 @@ datas = [('.env', '.'), ('icon.ico', '.'), ('icon.png', '.'), ('icon_check.png',
 binaries = []
 hiddenimports = [
     'pynput.keyboard._win32',
-    'pynput.mouse._win32',
     'ctypes',
     'ctypes.wintypes',
     'sounddevice',
